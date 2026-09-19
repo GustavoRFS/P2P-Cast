@@ -10,6 +10,15 @@ describe("status messages", () => {
         });
     });
 
+    it("explains when camera capture permission is denied", () => {
+        const error = new DOMException("Permission denied", "NotAllowedError");
+
+        expect(getMediaError(error, "camera")).toMatchObject({
+            title: "Permissão necessária",
+            message: "Permita o acesso à câmera e ao microfone para iniciar a transmissão.",
+        });
+    });
+
     it("explains when the broadcast peer is unavailable", () => {
         expect(getPeerError({ type: "peer-unavailable" })).toMatchObject({
             title: "Transmissão não encontrada",

@@ -18,6 +18,15 @@ export const CURSOR_OPTIONS = [
 export type CursorPreference = (typeof CURSOR_OPTIONS)[number]["value"];
 type DisplayMediaVideoConstraints = MediaTrackConstraints & { cursor: CursorPreference };
 
+export const CAPTURE_SOURCE_OPTIONS = [
+    { value: "screen", label: "Tela" },
+    { value: "camera", label: "Câmera" },
+    { value: "both", label: "Tela + câmera" },
+] as const;
+
+export type CaptureSource = (typeof CAPTURE_SOURCE_OPTIONS)[number]["value"];
+export type CaptureTrackSource = Exclude<CaptureSource, "both">;
+
 export const RESOLUTION_OPTIONS = [
     { value: "original", label: "Original", width: undefined, height: undefined },
     { value: "360p", label: "360p", width: 640, height: 360 },
@@ -30,18 +39,22 @@ export const RESOLUTION_OPTIONS = [
 ] as const;
 
 export type CaptureSettings = {
+    source: CaptureSource;
     resolution: (typeof RESOLUTION_OPTIONS)[number]["value"];
     fps: (typeof FPS_OPTIONS)[number];
     bitrate: (typeof BITRATE_OPTIONS)[number]["value"];
     audio: boolean;
+    microphone: boolean;
     cursor: CursorPreference;
 };
 
 export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
+    source: "screen",
     resolution: "1080p",
     fps: 30,
     bitrate: 6_000_000,
     audio: true,
+    microphone: true,
     cursor: "always",
 };
 
@@ -67,7 +80,9 @@ function isCaptureSettings(value: unknown): value is CaptureSettings {
         && FPS_OPTIONS.some(fps => fps === settings.fps)
         && BITRATE_OPTIONS.some(option => option.value === settings.bitrate)
         && typeof settings.audio === "boolean"
-        && CURSOR_OPTIONS.some(option => option.value === settings.cursor);
+        && CURSOR_OPTIONS.some(option => option.value === settings.cursor)
+        && (settings.source === undefined || CAPTURE_SOURCE_OPTIONS.some(option => option.value === settings.source))
+        && (settings.microphone === undefined || typeof settings.microphone === "boolean");
 }
 
 export function loadCaptureSettings(storage = getBrowserStorage()): CaptureSettings {
@@ -81,10 +96,12 @@ export function loadCaptureSettings(storage = getBrowserStorage()): CaptureSetti
         if (!isCaptureSettings(parsedSettings)) return { ...DEFAULT_CAPTURE_SETTINGS };
 
         return {
+            source: parsedSettings.source ?? DEFAULT_CAPTURE_SETTINGS.source,
             resolution: parsedSettings.resolution,
             fps: parsedSettings.fps,
             bitrate: parsedSettings.bitrate,
             audio: parsedSettings.audio,
+            microphone: parsedSettings.microphone ?? DEFAULT_CAPTURE_SETTINGS.microphone,
             cursor: parsedSettings.cursor,
         };
     } catch {
@@ -104,7 +121,17 @@ export function saveCaptureSettings(settings: CaptureSettings, storage = getBrow
 
 export function formatCaptureSettings(settings: CaptureSettings): string {
     const bitrate = BITRATE_OPTIONS.find(option => option.value === settings.bitrate)?.label ?? "Automático";
-    return `${settings.resolution === "original" ? "Original" : settings.resolution} · ${settings.fps} FPS · ${bitrate} · ${settings.audio ? "com áudio" : "sem áudio"}`;
+    const source = CAPTURE_SOURCE_OPTIONS.find(option => option.value === settings.source)?.label.toLowerCase() ?? "tela";
+    const audio = settings.source === "camera"
+        ? settings.microphone ? "com microfone" : "sem microfone"
+        : settings.source === "both"
+            ? `${settings.audio ? "áudio da tela" : "sem áudio da tela"} · ${settings.microphone ? "microfone" : "sem microfone"}`
+            : settings.audio ? "com áudio" : "sem áudio";
+    return `${source} · ${settings.resolution === "original" ? "Original" : settings.resolution} · ${settings.fps} FPS · ${bitrate} · ${audio}`;
+}
+
+export function getCaptureSources(source: CaptureSource): CaptureTrackSource[] {
+    return source === "both" ? ["screen", "camera"] : [source];
 }
 
 export function buildDisplayMediaVideoConstraints(settings: CaptureSettings): DisplayMediaVideoConstraints {
@@ -127,6 +154,31 @@ export function buildDisplayMediaOptions(settings: CaptureSettings): DisplayMedi
         video: buildDisplayMediaVideoConstraints(settings),
         audio: settings.audio,
     };
+}
+
+export function buildCameraMediaOptions(settings: CaptureSettings): MediaStreamConstraints {
+    const resolution = RESOLUTION_OPTIONS.find(option => option.value === settings.resolution);
+
+    return {
+        video: {
+            ...(resolution?.width && resolution.height
+                ? {
+                    width: { ideal: resolution.width, max: resolution.width },
+                    height: { ideal: resolution.height, max: resolution.height },
+                }
+                : {}),
+            frameRate: { ideal: settings.fps, max: settings.fps },
+        },
+        audio: settings.microphone,
+    };
+}
+
+export function setCaptureAudioEnabled(streams: Iterable<MediaStream | null>, enabled: boolean): void {
+    for (const stream of streams) {
+        stream?.getAudioTracks().forEach(track => {
+            track.enabled = enabled;
+        });
+    }
 }
 
 export async function applyVideoBitrate(

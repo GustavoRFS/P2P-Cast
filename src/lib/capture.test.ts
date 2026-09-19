@@ -2,15 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import {
     applyVideoBitrate,
     BITRATE_OPTIONS,
+    buildCameraMediaOptions,
     buildDisplayMediaOptions,
     buildDisplayMediaVideoConstraints,
+    CAPTURE_SOURCE_OPTIONS,
     loadCaptureSettings,
     CURSOR_OPTIONS,
     DEFAULT_CAPTURE_SETTINGS,
     formatCaptureSettings,
     FPS_OPTIONS,
+    getCaptureSources,
     RESOLUTION_OPTIONS,
     saveCaptureSettings,
+    setCaptureAudioEnabled,
 } from "./capture";
 
 function createMemoryStorage(initialValue?: string) {
@@ -25,6 +29,20 @@ function createMemoryStorage(initialValue?: string) {
 }
 
 describe("display capture constraints", () => {
+    it("offers screen, camera and combined capture sources", () => {
+        expect(CAPTURE_SOURCE_OPTIONS).toEqual([
+            { value: "screen", label: "Tela" },
+            { value: "camera", label: "Câmera" },
+            { value: "both", label: "Tela + câmera" },
+        ]);
+    });
+
+    it("expands a combined source into screen and camera captures", () => {
+        expect(getCaptureSources("screen")).toEqual(["screen"]);
+        expect(getCaptureSources("camera")).toEqual(["camera"]);
+        expect(getCaptureSources("both")).toEqual(["screen", "camera"]);
+    });
+
     it("offers capture resolutions from 360p through 8K", () => {
         expect(RESOLUTION_OPTIONS.map(({ value, width, height }) => ({ value, width, height }))).toEqual([
             { value: "original", width: undefined, height: undefined },
@@ -87,7 +105,7 @@ describe("display capture constraints", () => {
 
     it("summarizes the active video settings", () => {
         expect(formatCaptureSettings(DEFAULT_CAPTURE_SETTINGS)).toBe(
-            "1080p · 30 FPS · 6 Mbps · com áudio",
+            "tela · 1080p · 30 FPS · 6 Mbps · com áudio",
         );
     });
 
@@ -105,6 +123,39 @@ describe("display capture constraints", () => {
             },
             audio: false,
         });
+    });
+
+    it("builds camera media options with the same video settings and microphone toggle", () => {
+        expect(buildCameraMediaOptions({
+            ...DEFAULT_CAPTURE_SETTINGS,
+            resolution: "720p",
+            fps: 60,
+            microphone: false,
+        })).toEqual({
+            video: {
+                width: { ideal: 1280, max: 1280 },
+                height: { ideal: 720, max: 720 },
+                frameRate: { ideal: 60, max: 60 },
+            },
+            audio: false,
+        });
+    });
+
+    it("enables or mutes every audio track across the active capture streams", () => {
+        const screenAudioTrack = { kind: "audio", enabled: true };
+        const cameraAudioTrack = { kind: "audio", enabled: true };
+        const screenStream = { getAudioTracks: () => [screenAudioTrack] };
+        const cameraStream = { getAudioTracks: () => [cameraAudioTrack] };
+
+        setCaptureAudioEnabled([screenStream, cameraStream] as unknown as MediaStream[], false);
+
+        expect(screenAudioTrack.enabled).toBe(false);
+        expect(cameraAudioTrack.enabled).toBe(false);
+
+        setCaptureAudioEnabled([screenStream, cameraStream] as unknown as MediaStream[], true);
+
+        expect(screenAudioTrack.enabled).toBe(true);
+        expect(cameraAudioTrack.enabled).toBe(true);
     });
 
     it("applies the selected bitrate only to the video sender", async () => {
@@ -155,6 +206,8 @@ describe("capture settings persistence", () => {
             bitrate: null,
             audio: false,
             cursor: "never",
+            source: "camera",
+            microphone: true,
         }));
 
         expect(loadCaptureSettings(storage)).toEqual({
@@ -163,6 +216,8 @@ describe("capture settings persistence", () => {
             bitrate: null,
             audio: false,
             cursor: "never",
+            source: "camera",
+            microphone: true,
         });
     });
 
@@ -181,6 +236,8 @@ describe("capture settings persistence", () => {
             bitrate: 6_000_000,
             audio: true,
             cursor: "always",
+            source: "screen",
+            microphone: true,
         });
     });
 
@@ -192,6 +249,8 @@ describe("capture settings persistence", () => {
             bitrate: 2_000_000 as const,
             audio: false,
             cursor: "motion" as const,
+            source: "both" as const,
+            microphone: false,
         };
 
         saveCaptureSettings(settings, storage);

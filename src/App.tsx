@@ -3,14 +3,19 @@ import type { DataConnection, MediaConnection, Peer } from "peerjs";
 import {
     applyVideoBitrate,
     BITRATE_OPTIONS,
+    buildCameraMediaOptions,
     buildDisplayMediaOptions,
+    CAPTURE_SOURCE_OPTIONS,
     CURSOR_OPTIONS,
     FPS_OPTIONS,
     formatCaptureSettings,
+    getCaptureSources,
     loadCaptureSettings,
     RESOLUTION_OPTIONS,
     saveCaptureSettings,
+    setCaptureAudioEnabled,
     type CaptureSettings,
+    type CaptureTrackSource,
 } from "./lib/capture";
 import {
     buildChatMessage,
@@ -31,7 +36,6 @@ import { createPeer } from "./lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "./lib/receiver";
 import { buildWatchUrl, loadBroadcastId, parseWatchId, saveBroadcastId } from "./lib/room";
 import { getMediaError, getPeerError } from "./lib/status";
-import { toggleVideoAudio } from "./lib/video";
 import type { AppError, StreamMode } from "./types";
 
 const MODE_LABELS: Record<StreamMode, string> = {
@@ -50,6 +54,22 @@ const genericError: AppError = {
 
 function stopTracks(stream: MediaStream | null) {
     stream?.getTracks().forEach(track => track.stop());
+}
+
+type CaptureStreams = Record<CaptureTrackSource, MediaStream | null>;
+type RemoteStreams = CaptureStreams;
+
+const EMPTY_CAPTURE_STREAMS: CaptureStreams = {
+    screen: null,
+    camera: null,
+};
+
+function stopCaptureStreams(streams: CaptureStreams) {
+    Object.values(streams).forEach(stopTracks);
+}
+
+function getStreamForSource(streams: CaptureStreams, source: CaptureTrackSource) {
+    return streams[source];
 }
 
 function goHome() {
@@ -195,6 +215,22 @@ function HomeView({
                             </div>
                             <div className="capture-settings-fields">
                                 <label className="capture-setting">
+                                    <span>Fonte da transmissão</span>
+                                    <select
+                                        value={settings.source}
+                                        onChange={event => onSettingsChange(current => ({
+                                            ...current,
+                                            source: event.target.value as CaptureSettings["source"],
+                                        }))}
+                                    >
+                                        {CAPTURE_SOURCE_OPTIONS.map(option => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="capture-setting">
                                     <span>Resolução</span>
                                     <select
                                         value={settings.resolution}
@@ -244,7 +280,7 @@ function HomeView({
                                         ))}
                                     </select>
                                 </label>
-                                <label className="capture-setting">
+                                {settings.source !== "camera" && <label className="capture-setting">
                                     <span>Áudio da tela</span>
                                     <select
                                         value={settings.audio ? "on" : "off"}
@@ -257,7 +293,21 @@ function HomeView({
                                         <option value="off">Desligado</option>
                                     </select>
                                 </label>
-                                <label className="capture-setting">
+                                }
+                                {settings.source !== "screen" && <label className="capture-setting">
+                                    <span>Microfone</span>
+                                    <select
+                                        value={settings.microphone ? "on" : "off"}
+                                        onChange={event => onSettingsChange(current => ({
+                                            ...current,
+                                            microphone: event.target.value === "on",
+                                        }))}
+                                    >
+                                        <option value="on">Ligado</option>
+                                        <option value="off">Desligado</option>
+                                    </select>
+                                </label>}
+                                {settings.source !== "camera" && <label className="capture-setting">
                                     <span>Cursor</span>
                                     <select
                                         value={settings.cursor}
@@ -272,7 +322,7 @@ function HomeView({
                                             </option>
                                         ))}
                                     </select>
-                                </label>
+                                </label>}
                             </div>
                             <p className="settings-help">
                                 O bitrate é o limite por espectador. Valores maiores usam mais upload.
@@ -579,18 +629,20 @@ function ChatPanel({
 function BroadcastView() {
     const [mode, setMode] = useState<StreamMode>("idle");
     const [error, setError] = useState<AppError | null>(null);
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+    const [localStreams, setLocalStreams] = useState<CaptureStreams>(EMPTY_CAPTURE_STREAMS);
     const [captureSettings, setCaptureSettings] = useState<CaptureSettings>(loadCaptureSettings);
     const [shareUrl, setShareUrl] = useState<string | null>(null);
     const [viewerCount, setViewerCount] = useState(0);
     const [copied, setCopied] = useState(false);
+    const [audioMuted, setAudioMuted] = useState(false);
     const [chatMessages, setChatMessages] = useState<DisplayChatMessage[]>([]);
     const [chatOpen, setChatOpen] = useState(false);
     const [chatUnread, setChatUnread] = useState(0);
     const [chatSoundEnabled, setChatSoundEnabled] = useState(loadChatSoundEnabled);
-    const localVideoRef = useRef<HTMLVideoElement>(null);
+    const localScreenVideoRef = useRef<HTMLVideoElement>(null);
+    const localCameraVideoRef = useRef<HTMLVideoElement>(null);
     const localStageRef = useRef<HTMLDivElement>(null);
-    const localStreamRef = useRef<MediaStream | null>(null);
+    const localStreamsRef = useRef<CaptureStreams>(EMPTY_CAPTURE_STREAMS);
     const peerRef = useRef<Peer | null>(null);
     const callsRef = useRef<MediaConnection[]>([]);
     const chatConnectionsRef = useRef<DataConnection[]>([]);
@@ -643,6 +695,10 @@ function BroadcastView() {
         });
     }, []);
 
+    const updateViewerCount = useCallback(() => {
+        setViewerCount(new Set(callsRef.current.map(call => call.peer)).size);
+    }, []);
+
     const stopBroadcast = useCallback(() => {
         const peer = peerRef.current;
         peerRef.current = null;
@@ -652,14 +708,15 @@ function BroadcastView() {
         chatConnectionsRef.current.forEach(conn => conn.close());
         chatConnectionsRef.current = [];
         chatViewerIndexRef.current = 0;
-        stopTracks(localStreamRef.current);
-        localStreamRef.current = null;
+        stopCaptureStreams(localStreamsRef.current);
+        localStreamsRef.current = EMPTY_CAPTURE_STREAMS;
 
         peer?.destroy();
-        setLocalStream(null);
+        setLocalStreams(EMPTY_CAPTURE_STREAMS);
         setShareUrl(null);
         setViewerCount(0);
         setCopied(false);
+        setAudioMuted(false);
         setChatMessages([]);
         setChatOpen(false);
         setChatUnread(0);
@@ -671,26 +728,40 @@ function BroadcastView() {
         setError(null);
         setCopied(false);
         setCaptureSettings(settings);
+        setAudioMuted(false);
 
+        const nextStreams: CaptureStreams = { ...EMPTY_CAPTURE_STREAMS };
         try {
             const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
             if (!window.isSecureContext && !isLocalhost) {
-                throw new TypeError("Screen capture requires a secure context");
+                throw new TypeError("Media capture requires a secure context");
             }
 
-            if (!navigator.mediaDevices?.getDisplayMedia) {
+            const sources = getCaptureSources(settings.source);
+            if (sources.includes("screen") && !navigator.mediaDevices?.getDisplayMedia) {
                 throw new TypeError("Screen capture is not supported");
             }
+            if (sources.includes("camera") && !navigator.mediaDevices?.getUserMedia) {
+                throw new TypeError("Camera capture is not supported");
+            }
 
-            const stream = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
-            localStreamRef.current = stream;
-            setLocalStream(stream);
+            if (sources.includes("screen")) {
+                nextStreams.screen = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
+            }
+            if (sources.includes("camera")) {
+                nextStreams.camera = await navigator.mediaDevices.getUserMedia(buildCameraMediaOptions(settings));
+            }
+
+            localStreamsRef.current = nextStreams;
+            setLocalStreams(nextStreams);
+            setCaptureAudioEnabled(Object.values(nextStreams), true);
 
             const peer = createPeer(loadBroadcastId() ?? undefined);
             peerRef.current = peer;
 
-            const videoTrack = stream.getVideoTracks()[0];
-            videoTrack?.addEventListener("ended", stopBroadcast, { once: true });
+            Object.values(nextStreams).forEach(stream => {
+                stream?.getVideoTracks()[0]?.addEventListener("ended", stopBroadcast, { once: true });
+            });
 
             peer.on("open", id => {
                 saveBroadcastId(id);
@@ -699,17 +770,24 @@ function BroadcastView() {
             });
 
             peer.on("call", call => {
+                const requestedSource = call.metadata?.source === "camera" ? "camera" : "screen";
+                const stream = getStreamForSource(localStreamsRef.current, requestedSource);
+                if (!stream) {
+                    call.close();
+                    return;
+                }
+
                 callsRef.current.push(call);
-                setViewerCount(callsRef.current.length);
+                updateViewerCount();
                 call.answer(stream);
                 void applyVideoBitrate(call, settings.bitrate).catch(() => undefined);
                 call.on("close", () => {
                     callsRef.current = callsRef.current.filter(activeCall => activeCall !== call);
-                    setViewerCount(callsRef.current.length);
+                    updateViewerCount();
                 });
                 call.on("error", () => {
                     callsRef.current = callsRef.current.filter(activeCall => activeCall !== call);
-                    setViewerCount(callsRef.current.length);
+                    updateViewerCount();
                 });
             });
 
@@ -767,27 +845,40 @@ function BroadcastView() {
                 }
             });
         } catch (captureError) {
+            if (localStreamsRef.current !== nextStreams) stopCaptureStreams(nextStreams);
             stopBroadcast();
-            setError(getMediaError(captureError));
+            setError(getMediaError(captureError, settings.source));
             setMode("error");
         }
-    }, [captureSettings, stopBroadcast]);
+    }, [captureSettings, stopBroadcast, updateViewerCount]);
 
     useEffect(() => {
-        if (localVideoRef.current) {
-            localVideoRef.current.srcObject = localStream;
-        }
+        const videoBindings = [
+            [localScreenVideoRef.current, localStreams.screen],
+            [localCameraVideoRef.current, localStreams.camera],
+        ] as const;
+        videoBindings.forEach(([video, stream]) => {
+            if (video) video.srcObject = stream;
+        });
 
         return () => {
-            if (localVideoRef.current) localVideoRef.current.srcObject = null;
+            videoBindings.forEach(([video]) => {
+                if (video) video.srcObject = null;
+            });
         };
-    }, [localStream]);
+    }, [localStreams]);
 
     useEffect(() => {
         saveCaptureSettings(captureSettings);
     }, [captureSettings]);
 
     useEffect(() => stopBroadcast, [stopBroadcast]);
+
+    const toggleBroadcastAudio = () => {
+        const nextMuted = !audioMuted;
+        setCaptureAudioEnabled(Object.values(localStreamsRef.current), !nextMuted);
+        setAudioMuted(nextMuted);
+    };
 
     const copyShareUrl = async () => {
         if (!shareUrl) return;
@@ -843,15 +934,34 @@ function BroadcastView() {
                             <span className="viewer-count"><span className="viewer-icon">◉</span>{viewerCount} {viewerCount === 1 ? "pessoa" : "pessoas"} assistindo</span>
                         </div>
                         <div className="video-stage-shell" ref={localStageRef}>
-                            <div className="video-stage">
-                                <video ref={localVideoRef} autoPlay playsInline muted />
-                                {!localStream && (
+                            <div className={localStreams.screen && localStreams.camera ? "video-stage has-multiple-media" : "video-stage"}>
+                                {localStreams.screen && (
+                                    <video className="capture-video capture-video-screen" ref={localScreenVideoRef} autoPlay playsInline muted />
+                                )}
+                                {localStreams.camera && (
+                                    <video className="capture-video capture-video-camera" ref={localCameraVideoRef} autoPlay playsInline muted />
+                                )}
+                                {!localStreams.screen && !localStreams.camera && (
                                     <div className="video-placeholder">
                                         <span className="placeholder-mark">◌</span>
                                         <span>Aguardando o compartilhamento…</span>
                                     </div>
                                 )}
-                                {localStream && <VideoActions videoRef={localVideoRef} stageRef={localStageRef} />}
+                                {(localStreams.screen || localStreams.camera) && (
+                                    <VideoActions
+                                        videoRef={localStreams.screen ? localScreenVideoRef : localCameraVideoRef}
+                                        stageRef={localStageRef}
+                                    />
+                                )}
+                                {(localStreams.screen?.getAudioTracks().length || localStreams.camera?.getAudioTracks().length) ? (
+                                    <button
+                                        className="audio-unlock local-audio-toggle"
+                                        onClick={toggleBroadcastAudio}
+                                        aria-pressed={!audioMuted}
+                                    >
+                                        <span aria-hidden="true">◖</span> {audioMuted ? "Ativar áudio" : "Mutar áudio"}
+                                    </button>
+                                ) : null}
                                 <span className="stage-live-badge"><span /> LOCAL</span>
                             </div>
                             <ChatPanel
@@ -908,7 +1018,7 @@ function BroadcastView() {
 function ViewerView({ broadcastId }: { broadcastId: string }) {
     const [mode, setMode] = useState<StreamMode>("connecting");
     const [error, setError] = useState<AppError | null>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+    const [remoteStreams, setRemoteStreams] = useState<RemoteStreams>(EMPTY_CAPTURE_STREAMS);
     const [audioOn, setAudioOn] = useState(false);
     const [chatMessages, setChatMessages] = useState<DisplayChatMessage[]>([]);
     const [chatOpen, setChatOpen] = useState(false);
@@ -916,11 +1026,14 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
     const [chatSoundEnabled, setChatSoundEnabled] = useState(loadChatSoundEnabled);
     const [chatReady, setChatReady] = useState(false);
     const [viewerName, setViewerName] = useState(loadViewerName);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    const remoteScreenVideoRef = useRef<HTMLVideoElement>(null);
+    const remoteCameraVideoRef = useRef<HTMLVideoElement>(null);
     const remoteStageRef = useRef<HTMLDivElement>(null);
     const peerRef = useRef<Peer | null>(null);
-    const callRef = useRef<MediaConnection | null>(null);
-    const negotiationRef = useRef<NegotiationStream | null>(null);
+    const mediaCallsRef = useRef<Partial<Record<CaptureTrackSource, MediaConnection>>>({});
+    const negotiationsRef = useRef<Partial<Record<CaptureTrackSource, NegotiationStream>>>({});
+    const pendingMediaSourcesRef = useRef(new Set<CaptureTrackSource>());
+    const receivedMediaSourcesRef = useRef(new Set<CaptureTrackSource>());
     const chatConnRef = useRef<DataConnection | null>(null);
     const chatOpenRef = useRef(false);
     const chatSoundEnabledRef = useRef(chatSoundEnabled);
@@ -981,15 +1094,18 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
     }, []);
 
     const cleanup = useCallback(() => {
-        callRef.current?.close();
-        callRef.current = null;
-        negotiationRef.current?.dispose();
-        negotiationRef.current = null;
+        const peer = peerRef.current;
+        peerRef.current = null;
+        Object.values(mediaCallsRef.current).forEach(call => call?.close());
+        mediaCallsRef.current = {};
+        Object.values(negotiationsRef.current).forEach(negotiation => negotiation?.dispose());
+        negotiationsRef.current = {};
+        pendingMediaSourcesRef.current.clear();
+        receivedMediaSourcesRef.current.clear();
         chatConnRef.current?.close();
         chatConnRef.current = null;
-        peerRef.current?.destroy();
-        peerRef.current = null;
-        setRemoteStream(null);
+        peer?.destroy();
+        setRemoteStreams(EMPTY_CAPTURE_STREAMS);
         setChatMessages([]);
         setChatOpen(false);
         setChatUnread(0);
@@ -1017,23 +1133,45 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
                 if (peerRef.current !== peer) return;
 
                 try {
-                    const negotiation = createNegotiationStream();
-                    negotiationRef.current = negotiation;
-                    const call = peer.call(broadcastId, negotiation.stream, {
-                        metadata: { role: "viewer" },
-                    });
-                    if (!call) {
-                        fail({ type: "peer-unavailable" });
-                        return;
-                    }
+                    const mediaSources = getCaptureSources("both");
+                    pendingMediaSourcesRef.current = new Set(mediaSources);
 
-                    callRef.current = call;
-                    call.on("stream", stream => {
-                        setRemoteStream(stream);
-                        setMode("watching");
+                    const releaseMediaSource = (source: CaptureTrackSource, sourceError?: unknown) => {
+                        if (peerRef.current !== peer) return;
+
+                        pendingMediaSourcesRef.current.delete(source);
+                        receivedMediaSourcesRef.current.delete(source);
+                        delete mediaCallsRef.current[source];
+                        negotiationsRef.current[source]?.dispose();
+                        delete negotiationsRef.current[source];
+                        setRemoteStreams(current => ({ ...current, [source]: null }));
+
+                        if (pendingMediaSourcesRef.current.size === 0 && receivedMediaSourcesRef.current.size === 0) {
+                            fail(sourceError ?? { type: "peer-unavailable" });
+                        }
+                    };
+
+                    mediaSources.forEach(source => {
+                        const negotiation = createNegotiationStream();
+                        negotiationsRef.current[source] = negotiation;
+                        const call = peer.call(broadcastId, negotiation.stream, {
+                            metadata: { role: "viewer", source },
+                        });
+                        if (!call) {
+                            releaseMediaSource(source, { type: "peer-unavailable" });
+                            return;
+                        }
+
+                        mediaCallsRef.current[source] = call;
+                        call.on("stream", stream => {
+                            if (peerRef.current !== peer) return;
+                            receivedMediaSourcesRef.current.add(source);
+                            setRemoteStreams(current => ({ ...current, [source]: stream }));
+                            setMode("watching");
+                        });
+                        call.on("close", () => releaseMediaSource(source));
+                        call.on("error", peerError => releaseMediaSource(source, peerError));
                     });
-                    call.on("close", () => fail({ type: "peer-unavailable" }));
-                    call.on("error", peerError => fail(peerError));
 
                     const chatConn = peer.connect(broadcastId, { metadata: { role: CHAT_CONNECTION_ROLE } });
                     chatConnRef.current = chatConn;
@@ -1085,25 +1223,35 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
     }, [connect, cleanup]);
 
     useEffect(() => {
-        const video = remoteVideoRef.current;
-        if (!video) return;
-
-        video.srcObject = remoteStream;
-        video.muted = !audioOn;
-        if (remoteStream) void video.play().catch(() => undefined);
+        const videoBindings = [
+            [remoteScreenVideoRef.current, remoteStreams.screen],
+            [remoteCameraVideoRef.current, remoteStreams.camera],
+        ] as const;
+        videoBindings.forEach(([video, stream]) => {
+            if (!video) return;
+            video.srcObject = stream;
+            video.muted = !audioOn;
+            if (stream) void video.play().catch(() => undefined);
+        });
 
         return () => {
-            video.srcObject = null;
+            videoBindings.forEach(([video]) => {
+                if (video) video.srcObject = null;
+            });
         };
-    }, [audioOn, remoteStream]);
+    }, [audioOn, remoteStreams]);
 
     const toggleAudio = () => {
-        const video = remoteVideoRef.current;
-        if (!video) return;
-
-        const nextAudioOn = toggleVideoAudio(video, audioOn);
+        const nextAudioOn = !audioOn;
+        [remoteScreenVideoRef.current, remoteCameraVideoRef.current].forEach(video => {
+            if (video) video.muted = !nextAudioOn;
+        });
         setAudioOn(nextAudioOn);
-        if (nextAudioOn) void video.play().catch(() => undefined);
+        if (nextAudioOn) {
+            [remoteScreenVideoRef.current, remoteCameraVideoRef.current].forEach(video => {
+                if (video) void video.play().catch(() => undefined);
+            });
+        }
     };
 
     return (
@@ -1125,15 +1273,20 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
                         <span className="viewer-count">conexão ponto a ponto</span>
                     </div>
                     <div className="video-stage-shell" ref={remoteStageRef}>
-                        <div className="video-stage viewer-stage">
-                            <video ref={remoteVideoRef} autoPlay playsInline />
-                            {!remoteStream && mode !== "error" && (
+                        <div className={remoteStreams.screen && remoteStreams.camera ? "video-stage viewer-stage has-multiple-media" : "video-stage viewer-stage"}>
+                            {remoteStreams.screen && (
+                                <video className="capture-video capture-video-screen" ref={remoteScreenVideoRef} autoPlay playsInline />
+                            )}
+                            {remoteStreams.camera && (
+                                <video className="capture-video capture-video-camera" ref={remoteCameraVideoRef} autoPlay playsInline />
+                            )}
+                            {!remoteStreams.screen && !remoteStreams.camera && mode !== "error" && (
                                 <div className="video-placeholder">
                                     <span className="loader" />
                                     <span>{MODE_LABELS[mode]}…</span>
                                 </div>
                             )}
-                            {remoteStream && (
+                            {(remoteStreams.screen || remoteStreams.camera) && (
                                 <button
                                     className="audio-unlock"
                                     onClick={toggleAudio}
@@ -1142,8 +1295,13 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
                                     <span aria-hidden="true">◖</span> {audioOn ? "Mutar áudio" : "Ativar áudio"}
                                 </button>
                             )}
-                            {remoteStream && <VideoActions videoRef={remoteVideoRef} stageRef={remoteStageRef} />}
-                            {remoteStream && <span className="stage-live-badge"><span /> AO VIVO</span>}
+                            {(remoteStreams.screen || remoteStreams.camera) && (
+                                <VideoActions
+                                    videoRef={remoteStreams.screen ? remoteScreenVideoRef : remoteCameraVideoRef}
+                                    stageRef={remoteStageRef}
+                                />
+                            )}
+                            {(remoteStreams.screen || remoteStreams.camera) && <span className="stage-live-badge"><span /> AO VIVO</span>}
                         </div>
                         <ChatPanel
                             title="Chat com quem está assistindo"

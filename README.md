@@ -31,7 +31,9 @@ A URL da Vercel usa HTTPS, então getDisplayMedia poderá solicitar o compartilh
 
 ## Como funciona
 
-- O transmissor clica em **Iniciar transmissão** e escolhe uma tela ou janela.
+- O transmissor escolhe entre compartilhar a **tela**, a **câmera** ou os dois simultaneamente.
+- Resolução, FPS e bitrate podem ser configurados para qualquer fonte; o áudio da tela e o microfone podem ser ativados ou desativados separadamente.
+- Durante a transmissão, o transmissor pode mutar o áudio, e o espectador pode ativá-lo ou silenciá-lo localmente.
 - O app cria um ID temporário no PeerJS Cloud e gera um link.
 - O espectador abre o link e cria uma conexão WebRTC com o transmissor.
 - A imagem e o áudio seguem diretamente entre os navegadores quando a rede permite.

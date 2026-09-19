@@ -811,6 +811,24 @@ input:focus-visible {
     background: #071421;
 }
 
+.video-stage.has-multiple-media {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 0.38fr);
+    gap: 10px;
+    padding: 10px;
+}
+
+.video-stage.has-multiple-media .capture-video {
+    min-height: 0;
+    height: 100%;
+    border: 1px solid rgba(164, 213, 255, 0.12);
+    border-radius: 8px;
+}
+
+.video-stage.has-multiple-media .capture-video-camera {
+    object-fit: cover;
+}
+
 .video-placeholder {
     position: absolute;
     inset: 0;
@@ -1144,6 +1162,11 @@ input:focus-visible {
 
 .audio-unlock:hover {
     background: #a2f7ef;
+}
+
+.local-audio-toggle {
+    right: auto;
+    left: 14px;
 }
 
 .chat-widget {
@@ -1519,6 +1542,15 @@ input:focus-visible {
     .video-stage,
     .video-stage video {
         min-height: 250px;
+    }
+
+    .video-stage.has-multiple-media {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) minmax(150px, 0.56fr);
+    }
+
+    .video-stage.has-multiple-media .capture-video {
+        min-height: 0;
     }
 
     .viewer-stage,

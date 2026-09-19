@@ -1,30 +1,39 @@
 import type { AppError } from "../types";
+import type { CaptureSource } from "./capture";
 
-export function getMediaError(error: unknown): AppError {
+export function getMediaError(error: unknown, source: CaptureSource = "screen"): AppError {
+    const permissionMessage = source === "camera"
+        ? "Permita o acesso à câmera e ao microfone para iniciar a transmissão."
+        : source === "both"
+            ? "Permita o acesso à tela, câmera e microfone para iniciar a transmissão."
+            : "Permita o compartilhamento de tela para iniciar a transmissão.";
+
     if (error instanceof DOMException && error.name === "NotAllowedError") {
         return {
             title: "Permissão necessária",
-            message: "Permita o compartilhamento de tela para iniciar a transmissão.",
+            message: permissionMessage,
         };
     }
 
     if (error instanceof DOMException && error.name === "NotFoundError") {
         return {
-            title: "Nenhuma tela disponível",
-            message: "O navegador não encontrou uma tela ou janela para compartilhar.",
+            title: source === "camera" ? "Nenhuma câmera disponível" : "Nenhuma fonte disponível",
+            message: source === "camera"
+                ? "O navegador não encontrou uma câmera ou microfone disponíveis."
+                : "O navegador não encontrou uma tela, câmera ou microfone disponíveis.",
         };
     }
 
     if (error instanceof TypeError) {
         return {
             title: "Navegador incompatível",
-            message: "O compartilhamento precisa ser aberto em HTTPS ou em localhost.",
+            message: "A captura de mídia precisa ser aberta em HTTPS ou em localhost.",
         };
     }
 
     return {
         title: "Não foi possível iniciar",
-        message: "O navegador recusou a captura de tela. Tente novamente.",
+        message: "O navegador recusou a captura de mídia. Tente novamente.",
     };
 }
 
