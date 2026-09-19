@@ -1,0 +1,42 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - button "Voltar para o início" [ref=f2e5] [cursor=pointer]:
+      - generic [ref=f2e10]: p2pcast
+    - generic [ref=f2e11]: ESPECTADOR
+  - main [ref=f2e14]:
+    - generic [ref=f2e15]:
+      - generic [ref=f2e16]:
+        - generic [ref=f2e17]: sala compartilhada
+        - heading "Você entrou na transmissão." [level=1] [ref=f2e18]
+        - paragraph [ref=f2e19]: A imagem vem direto do navegador do seu amigo.
+      - generic [ref=f2e20]: A conexão precisa de atenção
+    - generic [ref=f2e23]:
+      - generic [ref=f2e24]: transmissão ao vivo
+      - generic [ref=f2e25]: conexão ponto a ponto
+    - alert [ref=f2e37]:
+      - generic [aria-hidden] [ref=f2e38]: "!"
+      - generic [ref=f2e39]:
+        - strong [ref=f2e40]: Transmissão não encontrada
+        - paragraph [ref=f2e41]: O link pode ter expirado ou o transmissor encerrou a sessão.
+      - generic [ref=f2e42]:
+        - button "Tentar novamente" [ref=f2e43] [cursor=pointer]
+        - button "Voltar ao início" [ref=f2e44] [cursor=pointer]
+    - generic [ref=f2e31]:
+      - generic [ref=f2e32]: ⌁ conexão WebRTC criptografada
+      - button "Sair da sala" [ref=f2e33] [cursor=pointer]: Sair da sala ×
+  - generic [ref=f2e34]:
+    - dialog "Chat com quem está assistindo" [ref=f2e45]:
+      - generic [ref=f2e46]:
+        - strong [ref=f2e47]: Chat com quem está assistindo
+        - button "Fechar chat" [ref=f2e48] [cursor=pointer]: ×
+      - generic [ref=f2e49]:
+        - generic [ref=f2e50]: Seu nome (opcional)
+        - textbox "Seu nome (opcional)" [ref=f2e51]:
+          - /placeholder: Espectador
+          - text: Ana
+      - paragraph [ref=f2e53]: Nenhuma mensagem ainda. Mande um oi.
+      - generic [ref=f2e54]:
+        - textbox "Conectando ao chat…" [disabled] [ref=f2e55]
+        - button "Enviar mensagem" [disabled] [ref=f2e56]: ➤
+    - button "Fechar chat" [expanded] [active] [ref=f2e57] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f2e36]: ×

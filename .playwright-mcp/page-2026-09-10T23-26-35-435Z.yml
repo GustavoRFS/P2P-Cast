@@ -1,0 +1,41 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - button "Voltar para o início" [ref=f1e5] [cursor=pointer]:
+      - generic [ref=f1e10]: p2pcast
+    - generic [ref=f1e11]: ESPECTADOR
+  - main [ref=f1e14]:
+    - generic [ref=f1e15]:
+      - generic [ref=f1e16]:
+        - generic [ref=f1e17]: sala compartilhada
+        - heading "Você entrou na transmissão." [level=1] [ref=f1e18]
+        - paragraph [ref=f1e19]: A imagem vem direto do navegador do seu amigo.
+      - generic [ref=f1e20]: A conexão precisa de atenção
+    - generic [ref=f1e23]:
+      - generic [ref=f1e24]: transmissão ao vivo
+      - generic [ref=f1e25]: conexão ponto a ponto
+    - alert [ref=f1e37]:
+      - generic [aria-hidden] [ref=f1e38]: "!"
+      - generic [ref=f1e39]:
+        - strong [ref=f1e40]: Transmissão não encontrada
+        - paragraph [ref=f1e41]: O link pode ter expirado ou o transmissor encerrou a sessão.
+      - generic [ref=f1e42]:
+        - button "Tentar novamente" [ref=f1e43] [cursor=pointer]
+        - button "Voltar ao início" [ref=f1e44] [cursor=pointer]
+    - generic [ref=f1e31]:
+      - generic [ref=f1e32]: ⌁ conexão WebRTC criptografada
+      - button "Sair da sala" [ref=f1e33] [cursor=pointer]: Sair da sala ×
+  - generic [ref=f1e34]:
+    - dialog "Chat com quem está assistindo" [ref=f1e45]:
+      - generic [ref=f1e46]:
+        - strong [ref=f1e47]: Chat com quem está assistindo
+        - button "Fechar chat" [ref=f1e48] [cursor=pointer]: ×
+      - generic [ref=f1e49]:
+        - generic [ref=f1e50]: Seu nome (opcional)
+        - textbox "Seu nome (opcional)" [ref=f1e51]:
+          - /placeholder: Espectador
+      - paragraph [ref=f1e53]: Nenhuma mensagem ainda. Mande um oi.
+      - generic [ref=f1e54]:
+        - textbox "Conectando ao chat…" [disabled] [ref=f1e55]
+        - button "Enviar mensagem" [disabled] [ref=f1e56]: ➤
+    - button "Fechar chat" [expanded] [active] [ref=f1e57] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f1e36]: ×

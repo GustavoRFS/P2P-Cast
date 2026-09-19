@@ -1,0 +1,25 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - button "Voltar para o início" [ref=e5] [cursor=pointer]:
+      - generic [ref=e10]: p2pcast
+    - generic [ref=e11]:
+      - generic [ref=e12]: ESPECTADOR
+      - generic [ref=e14]: sem servidor de vídeo
+  - main [ref=e15]:
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: sala compartilhada
+        - heading "Você entrou na transmissão." [level=1] [ref=e19]
+        - paragraph [ref=e20]: A imagem vem direto do navegador do seu amigo.
+      - generic [ref=e21]: Conectando à transmissão
+    - generic [ref=e23]:
+      - generic [ref=e24]:
+        - generic [ref=e25]: transmissão ao vivo
+        - generic [ref=e26]: conexão ponto a ponto
+      - generic [ref=e27]:
+        - generic [ref=e28]: Conectando à transmissão…
+        - button "Abrir chat" [ref=e33] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e34]: 💬
+    - generic [ref=e35]:
+      - generic [ref=e36]: ⌁ conexão WebRTC criptografada
+      - button "Sair da sala" [ref=e37] [cursor=pointer]: Sair da sala ×
