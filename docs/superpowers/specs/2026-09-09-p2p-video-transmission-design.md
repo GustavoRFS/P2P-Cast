@@ -16,7 +16,7 @@ STUN não garante conexão em todas as redes. Sem TURN, algumas combinações de
 2. O navegador solicita permissão para compartilhar tela e áudio via `getDisplayMedia`.
 3. O app cria um `Peer` e espera o ID ser registrado no PeerJS Cloud.
 4. O app mostra uma URL com o ID do transmissor e oferece cópia para a área de transferência.
-5. Um espectador abre a URL; o app cria seu `Peer` e chama o ID do transmissor com uma faixa de vídeo preta e uma faixa de áudio silenciosa geradas localmente, sem pedir acesso à câmera ou ao microfone. Isso atende à exigência atual do método `peer.call` e permite que o transmissor devolva a mídia real.
+5. Um espectador abre a URL, o app cria seu `Peer` e chama o ID do transmissor com uma faixa de vídeo preta e uma faixa de áudio silenciosa geradas localmente, sem pedir acesso à câmera ou ao microfone. Isso atende à exigência atual do método `peer.call` e permite que o transmissor devolva a mídia real.
 6. O transmissor atende a chamada e envia seu `MediaStream`.
 7. O espectador mostra o stream em um elemento `<video>`.
 8. Encerrar a captura encerra a chamada, destrói o peer e retorna à tela inicial.
