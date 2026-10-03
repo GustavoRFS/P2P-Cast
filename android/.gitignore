@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.hprof
+/app/build
+/app/release
+
+# Signing key — never commit. Losing this means future release builds
+# can't be published as updates to the same app.
+/keystore/

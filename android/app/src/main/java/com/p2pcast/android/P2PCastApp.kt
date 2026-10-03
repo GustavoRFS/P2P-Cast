@@ -1,0 +1,15 @@
+package com.p2pcast.android
+
+import android.app.Application
+import org.webrtc.PeerConnectionFactory
+
+class P2PCastApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(this)
+                .setEnableInternalTracer(false)
+                .createInitializationOptions(),
+        )
+    }
+}
