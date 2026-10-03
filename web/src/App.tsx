@@ -35,11 +35,36 @@ import {
     type ChatMessage,
 } from "./lib/chat";
 import { createChatNotificationPlayer, type ChatNotificationPlayer } from "./lib/chat-sound";
-import { createPeer } from "./lib/peer";
+import { createPeer, sendPeerLeave } from "./lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "./lib/receiver";
 import { buildWatchUrl, loadBroadcastId, parseWatchId, saveBroadcastId } from "./lib/room";
+import { createViewerSessionId, loadViewerId } from "./lib/viewer";
 import { getMediaError, getPeerError } from "./lib/status";
 import type { AppError, StreamMode } from "./types";
+
+const MAX_MEDIA_CONNECTIONS_PER_SESSION = 2;
+
+function getMediaConnectionIdentity(peerId: string, metadata: unknown): string {
+    if (typeof metadata === "object" && metadata !== null && "viewerId" in metadata) {
+        const viewerId = (metadata as { viewerId?: unknown }).viewerId;
+        if (typeof viewerId === "string" && viewerId.trim() && viewerId.length <= 128) {
+            return `viewer:${viewerId.trim()}`;
+        }
+    }
+
+    return `peer:${peerId}`;
+}
+
+function getMediaConnectionSessionId(peerId: string, metadata: unknown): string {
+    if (typeof metadata === "object" && metadata !== null && "viewerSessionId" in metadata) {
+        const sessionId = (metadata as { viewerSessionId?: unknown }).viewerSessionId;
+        if (typeof sessionId === "string" && sessionId.trim() && sessionId.length <= 128) {
+            return `session:${sessionId.trim()}`;
+        }
+    }
+
+    return `peer:${peerId}`;
+}
 
 const MODE_LABELS: Record<StreamMode, string> = {
     idle: "Pronto para começar",
@@ -780,18 +805,36 @@ function BroadcastView() {
                     return;
                 }
 
+                const viewerIdentity = getMediaConnectionIdentity(call.peer, call.metadata);
+                const activeCallsForViewer = callsRef.current.filter(activeCall =>
+                    getMediaConnectionIdentity(activeCall.peer, activeCall.metadata) === viewerIdentity,
+                );
+                const viewerSessionId = getMediaConnectionSessionId(call.peer, call.metadata);
+                const anotherSessionIsActive = activeCallsForViewer.some(activeCall =>
+                    getMediaConnectionSessionId(activeCall.peer, activeCall.metadata) !== viewerSessionId,
+                );
+                if (anotherSessionIsActive || activeCallsForViewer.length >= MAX_MEDIA_CONNECTIONS_PER_SESSION) {
+                    call.close();
+                    sendPeerLeave(peer, call.peer);
+                    return;
+                }
+
                 callsRef.current.push(call);
                 updateViewerCount();
-                call.answer(stream);
-                void applyVideoBitrate(call, settings.bitrate).catch(() => undefined);
-                call.on("close", () => {
+
+                const removeCall = () => {
                     callsRef.current = callsRef.current.filter(activeCall => activeCall !== call);
                     updateViewerCount();
+                };
+                call.on("close", () => {
+                    removeCall();
                 });
                 call.on("error", () => {
-                    callsRef.current = callsRef.current.filter(activeCall => activeCall !== call);
-                    updateViewerCount();
+                    removeCall();
                 });
+
+                call.answer(stream);
+                void applyVideoBitrate(call, settings.bitrate).catch(() => undefined);
             });
 
             peer.on("connection", conn => {
@@ -1175,6 +1218,8 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
         setAudioOn(false);
 
         try {
+            const viewerId = loadViewerId();
+            const viewerSessionId = createViewerSessionId();
             const peer = createPeer();
             peerRef.current = peer;
 
@@ -1211,7 +1256,7 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
                         const negotiation = createNegotiationStream();
                         negotiationsRef.current[source] = negotiation;
                         const call = peer.call(broadcastId, negotiation.stream, {
-                            metadata: { role: "viewer", source },
+                            metadata: { role: "viewer", source, viewerId, viewerSessionId },
                         });
                         if (!call) {
                             releaseMediaSource(source, { type: "peer-unavailable" });
@@ -1229,7 +1274,9 @@ function ViewerView({ broadcastId }: { broadcastId: string }) {
                         call.on("error", peerError => releaseMediaSource(source, peerError));
                     });
 
-                    const chatConn = peer.connect(broadcastId, { metadata: { role: CHAT_CONNECTION_ROLE } });
+                    const chatConn = peer.connect(broadcastId, {
+                        metadata: { role: CHAT_CONNECTION_ROLE, viewerId, viewerSessionId },
+                    });
                     chatConnRef.current = chatConn;
                     chatConn.on("open", () => {
                         if (peerRef.current === peer) setChatReady(true);
