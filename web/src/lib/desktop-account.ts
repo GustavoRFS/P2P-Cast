@@ -69,7 +69,8 @@ async function fetchSavedProfile(config: DesktopConfig, session: SavedSession): 
     const response = await fetch(new URL("/api/me", config.backendUrl), {
         headers: { authorization: `Bearer ${session.token}` },
     });
-    if (!response.ok) return null;
+    if (response.status === 401) return null;
+    if (!response.ok) throw new Error("O backend não conseguiu validar a sessão Discord agora.");
     const body: unknown = await response.json();
     return typeof body === "object" && body !== null && "user" in body
         ? decodeProfile((body as { user?: unknown }).user)
@@ -107,7 +108,17 @@ export function useDesktopAccount(): DesktopAccount {
 
                 const stored = await desktop.getSavedSession();
                 if (!active || !stored) return;
-                const profile = await fetchSavedProfile(desktopConfig, stored).catch(() => null);
+                let profile: DiscordProfile | null;
+                try {
+                    profile = await fetchSavedProfile(desktopConfig, stored);
+                } catch (validationError) {
+                    if (!active) return;
+                    setSession(stored);
+                    setError(validationError instanceof Error
+                        ? `${validationError.message} A sessão local foi mantida.`
+                        : "Não foi possível validar a sessão Discord agora. A sessão local foi mantida.");
+                    return;
+                }
                 if (!active) return;
                 if (!profile) {
                     await desktop.clearSession();

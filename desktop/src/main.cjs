@@ -12,10 +12,12 @@ protocol.registerSchemesAsPrivileged([{
 
 const APP_ORIGIN = "p2pcast-app://desktop";
 const AUTH_CODE = /^[A-Za-z0-9_-]{43}$/;
+const LOGIN_VERIFIER_TTL_MS = 10 * 60_000;
 const helperProcesses = new Map();
 let mainWindow = null;
 let selectedSourceId = null;
 let pendingAuthCode = null;
+let loginVerifierTimer = null;
 
 function readConfig() {
     let fileConfig = {};
@@ -161,6 +163,8 @@ function createWindow() {
     mainWindow.webContents.on("will-navigate", (event, url) => {
         if (!trustedRendererUrl(url)) event.preventDefault();
     });
+    mainWindow.webContents.on("render-process-gone", stopAllHelpers);
+    mainWindow.webContents.on("destroyed", stopAllHelpers);
 
     const devUrl = process.env.P2PCAST_RENDERER_URL;
     if (devUrl) {
@@ -192,6 +196,63 @@ function sessionPath() {
 
 function loginVerifierPath() {
     return path.join(app.getPath("userData"), "discord-login.bin");
+}
+
+function deleteLoginVerifierFile() {
+    if (loginVerifierTimer) clearTimeout(loginVerifierTimer);
+    loginVerifierTimer = null;
+    try {
+        fs.unlinkSync(loginVerifierPath());
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+    }
+}
+
+function tryDeleteLoginVerifierFile() {
+    try {
+        deleteLoginVerifierFile();
+    } catch (error) {
+        console.error("Could not remove the Discord login verifier:", error.message);
+    }
+}
+
+function validLoginVerifierRecord(value) {
+    return typeof value?.verifier === "string"
+        && /^[A-Za-z0-9_-]{43}$/.test(value.verifier)
+        && typeof value.savedAt === "number"
+        && value.savedAt <= Date.now()
+        && Date.now() - value.savedAt < LOGIN_VERIFIER_TTL_MS;
+}
+
+function scheduleLoginVerifierDeletion(savedAt) {
+    if (loginVerifierTimer) clearTimeout(loginVerifierTimer);
+    const remaining = Math.max(1, savedAt + LOGIN_VERIFIER_TTL_MS - Date.now());
+    loginVerifierTimer = setTimeout(() => {
+        try {
+            deleteLoginVerifierFile();
+        } catch (error) {
+            console.error("Could not remove the expired Discord login verifier:", error.message);
+        }
+    }, remaining);
+    loginVerifierTimer.unref?.();
+}
+
+function expireLoginVerifierOnStartup() {
+    if (!canUseSecureStorage()) {
+        tryDeleteLoginVerifierFile();
+        return;
+    }
+    try {
+        const stored = JSON.parse(safeStorage.decryptString(fs.readFileSync(loginVerifierPath())));
+        if (!validLoginVerifierRecord(stored)) {
+            tryDeleteLoginVerifierFile();
+            return;
+        }
+        scheduleLoginVerifierDeletion(stored.savedAt);
+    } catch (error) {
+        if (error.code === "ENOENT") return;
+        tryDeleteLoginVerifierFile();
+    }
 }
 
 function canUseSecureStorage() {
@@ -417,13 +478,20 @@ function registerIpc() {
 
     ipcMain.handle("desktop:auth:verifier:get", event => {
         assertMainFrame(event);
-        if (!canUseSecureStorage()) return null;
+        if (!canUseSecureStorage()) {
+            tryDeleteLoginVerifierFile();
+            return null;
+        }
         try {
             const stored = JSON.parse(safeStorage.decryptString(fs.readFileSync(loginVerifierPath())));
-            if (typeof stored?.verifier !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(stored.verifier)
-                || typeof stored.savedAt !== "number" || Date.now() - stored.savedAt > 10 * 60_000) return null;
+            if (!validLoginVerifierRecord(stored)) {
+                tryDeleteLoginVerifierFile();
+                return null;
+            }
+            scheduleLoginVerifierDeletion(stored.savedAt);
             return stored.verifier;
         } catch {
+            tryDeleteLoginVerifierFile();
             return null;
         }
     });
@@ -433,17 +501,15 @@ function registerIpc() {
         if (!canUseSecureStorage()) throw new Error("Secure credential storage is not available on this system");
         if (typeof verifier !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(verifier)) throw new TypeError("Invalid login verifier");
         fs.mkdirSync(path.dirname(loginVerifierPath()), { recursive: true });
-        const encrypted = safeStorage.encryptString(JSON.stringify({ verifier, savedAt: Date.now() }));
+        const savedAt = Date.now();
+        const encrypted = safeStorage.encryptString(JSON.stringify({ verifier, savedAt }));
         fs.writeFileSync(loginVerifierPath(), encrypted, { mode: 0o600 });
+        scheduleLoginVerifierDeletion(savedAt);
     });
 
     ipcMain.handle("desktop:auth:verifier:clear", event => {
         assertMainFrame(event);
-        try {
-            fs.unlinkSync(loginVerifierPath());
-        } catch (error) {
-            if (error.code !== "ENOENT") throw error;
-        }
+        deleteLoginVerifierFile();
     });
 
     ipcMain.handle("desktop:audio:start", (event, sourceId) => {
@@ -506,6 +572,7 @@ if (!singleInstance) {
     }
 
     app.whenReady().then(async () => {
+        expireLoginVerifierOnStartup();
         await installAppProtocol();
         registerIpc();
         session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {

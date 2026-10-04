@@ -25,6 +25,7 @@ Edite `backend/.env` e configure:
 - `DISCORD_CLIENT_ID` e `DISCORD_CLIENT_SECRET`: credenciais de uma aplicação criada no Discord Developer Portal.
 - `DISCORD_REDIRECT_URI`: URL pública `${PUBLIC_URL}/auth/discord/callback`, também cadastrada como redirect URI no Discord.
 - `JWT_SECRET`: segredo aleatório com pelo menos 32 caracteres.
+- `NODE_ENV=development` habilita valores locais durante desenvolvimento. Em produção, defina `NODE_ENV=production` e configure todos os segredos; fora do modo de desenvolvimento o backend falha ao iniciar se faltar qualquer um deles.
 - `APP_ORIGINS`: origins exatos do app desktop (`p2pcast-app://desktop`) e, durante desenvolvimento, Vite (`http://127.0.0.1:5173,http://localhost:5173`).
 
 `whitelist.example.json` mostra o formato. Em `whitelist.json`, mantenha apenas strings com os IDs Discord autorizados. O arquivo real é ignorado pelo Git. Se ele não existir, nenhum usuário pode entrar. O serviço consulta a whitelist em cada login, e qualquer edição passa a valer no próximo login.

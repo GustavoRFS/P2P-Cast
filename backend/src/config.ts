@@ -29,17 +29,13 @@ function getPort(): number {
 }
 
 export function getConfig(): BackendConfig {
-    const production = process.env.NODE_ENV === "production";
-    const publicUrl = production ? required("PUBLIC_URL") : process.env.PUBLIC_URL?.trim() || "http://localhost:3001";
-    const discordClientId = process.env.DISCORD_CLIENT_ID?.trim() || "development-client-id";
-    const discordClientSecret = process.env.DISCORD_CLIENT_SECRET?.trim() || "development-client-secret";
+    const development = process.env.NODE_ENV === "development";
+    const publicUrl = development ? process.env.PUBLIC_URL?.trim() || "http://localhost:3001" : required("PUBLIC_URL");
+    const discordClientId = development ? process.env.DISCORD_CLIENT_ID?.trim() || "development-client-id" : required("DISCORD_CLIENT_ID");
+    const discordClientSecret = development ? process.env.DISCORD_CLIENT_SECRET?.trim() || "development-client-secret" : required("DISCORD_CLIENT_SECRET");
     const discordRedirectUri = process.env.DISCORD_REDIRECT_URI?.trim()
         || `${publicUrl.replace(/\/$/, "")}/auth/discord/callback`;
-    const jwtSecret = process.env.JWT_SECRET?.trim() || "local-development-secret-change-this-32-chars";
-
-    if (production && (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET)) {
-        throw new Error("DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET are required in production");
-    }
+    const jwtSecret = development ? process.env.JWT_SECRET?.trim() || "local-development-secret-change-this-32-chars" : required("JWT_SECRET");
     if (jwtSecret.length < 32) throw new Error("JWT_SECRET must contain at least 32 characters");
 
     const originValues = process.env.APP_ORIGINS?.split(",")
