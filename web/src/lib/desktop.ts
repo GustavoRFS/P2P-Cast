@@ -8,10 +8,12 @@ export type DesktopWindow = {
 };
 
 export type DesktopConfig = {
+    host: "electron" | "tauri";
     backendUrl: string;
     webUrl: string;
-    appOrigin: "p2pcast-app://desktop";
+    appOrigin: string;
     isolatedAudioAvailable: boolean;
+    capturePicker: "window-list" | "system-window";
 };
 
 const desktopCaptureReleases = new WeakMap<MediaStream, () => void>();
@@ -35,23 +37,35 @@ export function releaseDesktopCapture(stream: MediaStream | null): void {
     desktopCaptureReleases.delete(stream);
 }
 
-export async function captureDesktopWindow(sourceId: string, settings: CaptureSettings): Promise<MediaStream> {
+export async function captureDesktopWindow(sourceId: string, settings: CaptureSettings, desktopConfig: DesktopConfig): Promise<MediaStream> {
     const desktop = window.p2pcastDesktop;
     if (!desktop) throw new Error("A seleção de janela só funciona no app desktop.");
-    const desktopConfig = await desktop.getConfig();
     if (settings.audio && !desktopConfig.isolatedAudioAvailable) {
-        throw new Error("O áudio isolado deste aplicativo está disponível no Windows quando o capturador nativo está instalado.");
+        throw new Error("O áudio isolado do aplicativo está disponível apenas no Electron para Windows com o capturador nativo instalado.");
     }
 
-    await desktop.selectWindow(sourceId);
+    if (desktopConfig.capturePicker === "window-list") await desktop.selectWindow(sourceId);
+    const pickerOptions = desktopConfig.capturePicker === "system-window"
+        ? {
+            monitorTypeSurfaces: "exclude",
+            selfBrowserSurface: "exclude",
+            systemAudio: "exclude",
+        }
+        : {};
     const videoStream = await navigator.mediaDevices.getDisplayMedia({
         video: buildDisplayMediaVideoConstraints(settings),
         audio: false,
-    });
+        ...pickerOptions,
+    } as DisplayMediaStreamOptions);
+    videoStream.getAudioTracks().forEach(track => track.stop());
     const videoTrack = videoStream.getVideoTracks()[0];
     if (!videoTrack) {
         videoStream.getTracks().forEach(track => track.stop());
         throw new Error("O sistema não retornou vídeo para a janela selecionada.");
+    }
+    if (desktopConfig.capturePicker === "system-window" && videoTrack.getSettings().displaySurface !== "window") {
+        videoStream.getTracks().forEach(track => track.stop());
+        throw new Error("Escolha uma janela de aplicativo no seletor do sistema. Captura de tela inteira não está disponível no Tauri.");
     }
 
     let audioContext: AudioContext | null = null;

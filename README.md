@@ -26,7 +26,7 @@ Edite `backend/.env` e configure:
 - `DISCORD_REDIRECT_URI`: URL pública `${PUBLIC_URL}/auth/discord/callback`, também cadastrada como redirect URI no Discord.
 - `JWT_SECRET`: segredo aleatório com pelo menos 32 caracteres.
 - `NODE_ENV=development` habilita valores locais durante desenvolvimento. Em produção, defina `NODE_ENV=production` e configure todos os segredos; fora do modo de desenvolvimento o backend falha ao iniciar se faltar qualquer um deles.
-- `APP_ORIGINS`: origins exatos do app desktop (`p2pcast-app://desktop`) e, durante desenvolvimento, Vite (`http://127.0.0.1:5173,http://localhost:5173`).
+- `APP_ORIGINS`: origins exatos dos clientes desktop. Inclua `p2pcast-app://desktop` para Electron e `http://tauri.localhost` (Windows) e `tauri://localhost` (macOS/Linux) para Tauri. Durante desenvolvimento, inclua também `http://127.0.0.1:5173` e `http://localhost:5173`.
 
 `whitelist.example.json` mostra o formato. Em `whitelist.json`, mantenha apenas strings com os IDs Discord autorizados. O arquivo real é ignorado pelo Git. Se ele não existir, nenhum usuário pode entrar. O serviço consulta a whitelist em cada login, e qualquer edição passa a valer no próximo login.
 
@@ -85,6 +85,25 @@ npm run dev
 Para gerar o instalador Windows, use `npm run build:win`. Para gerar um diretório empacotado no sistema atual, use `npm run build`.
 
 O helper identifica o processo dono da janela e captura esse processo e seus filhos. Por exemplo, ao selecionar CS2, sons de Discord e Spotify não entram no áudio transmitido. Em macOS e Linux, o desktop transmite a janela selecionada sem áudio do aplicativo até haver uma captura nativa isolada para essas plataformas. No Linux, a seleção de janela também depende das fontes permitidas por X11 ou PipeWire. Se o helper Windows não iniciar, o app mostra o erro e não troca para áudio global. Desligar a opção permite continuar só com vídeo.
+
+## Desktop Tauri para comparação
+
+O host Tauri em `desktop-tauri/` usa a mesma aplicação React em `web/`, o mesmo backend, login Discord/PKCE, presença, PeerJS e links de sala. Para compilação nativa, instale Rust stable e as dependências desktop do Tauri para o sistema usado para compilar (WebView2/MSVC no Windows, Xcode no macOS ou WebKitGTK/GTK no Linux).
+
+```sh
+cd web
+npm ci
+cd ../desktop-tauri
+npm install
+cp config.example.json config.json
+npm run dev
+```
+
+Configure `backendUrl` e `webUrl` em `desktop-tauri/config.json` durante o desenvolvimento. No app empacotado, use `P2PCAST_CONFIG_PATH` ou crie `config.json` na pasta de configuração do P2P-Cast Tauri do sistema operacional. `P2PCAST_BACKEND_URL` e `P2PCAST_WEB_URL` também podem sobrescrever os valores. No primeiro uso, o Tauri grava a sessão e o verifier PKCE no gerenciador de credenciais do sistema operacional. Em Linux, é necessário ter um Secret Service disponível.
+
+Para gerar instaladores, use `npm run build:windows`, `npm run build:macos` ou `npm run build:linux` dentro de `desktop-tauri/`. O Tauri usa o WebView do sistema operacional (WebView2 no Windows, WKWebView no macOS e WebKitGTK no Linux); por isso, compare tanto o tamanho do instalador quanto o tamanho instalado. O bootstrapper do WebView2 pode instalar um runtime externo no Windows.
+
+O seletor nativo do Tauri pede que a pessoa escolha uma janela. A aplicação confere que o WebView retornou uma janela e encerra a captura se o sistema devolver a tela inteira. O áudio da janela e o áudio do sistema ficam desligados no Tauri; assim a transmissão não leva sons do Discord, Spotify ou outros aplicativos. O microfone continua opcional. A versão Tauri ainda não envia o áudio do jogo. Para desempenho, rode Electron e Tauri no mesmo computador com a mesma resolução, FPS, bitrate, conta e número de espectadores, e compare CPU e memória durante a transmissão. Como o Tauri não inclui áudio isolado, a medição de mídia não é idêntica.
 
 ## Compatibilidade do protocolo
 

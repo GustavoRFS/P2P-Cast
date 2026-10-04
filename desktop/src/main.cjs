@@ -48,10 +48,12 @@ function readConfig() {
         throw new Error("P2PCAST_WEB_URL must use HTTPS outside localhost");
     }
     return {
+        host: "electron",
         backendUrl: parsed.origin,
         webUrl: web.origin,
         appOrigin: APP_ORIGIN,
         isolatedAudioAvailable: process.platform === "win32" && fs.existsSync(audioHelperPath()),
+        capturePicker: "window-list",
     };
 }
 

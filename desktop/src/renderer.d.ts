@@ -34,10 +34,12 @@ declare global {
             getWindowSources(): Promise<DesktopWindowSource[]>;
             selectWindow(sourceId: string): Promise<void>;
             getConfig(): Promise<{
+                host: "electron" | "tauri";
                 backendUrl: string;
                 webUrl: string;
-                appOrigin: "p2pcast-app://desktop";
+                appOrigin: string;
                 isolatedAudioAvailable: boolean;
+                capturePicker: "window-list" | "system-window";
             }>;
             loginWithDiscord(codeChallenge: string): Promise<void>;
             getSavedSession(): Promise<DesktopSavedSession | null>;
@@ -47,6 +49,7 @@ declare global {
             saveLoginVerifier(verifier: string): Promise<void>;
             clearLoginVerifier(): Promise<void>;
             onAuthCallback(listener: (code: string) => void): () => void;
+            // These methods are Electron-only. The Tauri bridge rejects app audio and returns no audio events.
             startApplicationAudio(sourceId: string): Promise<{
                 captureId: string;
                 format: DesktopApplicationAudioFormat;

@@ -183,6 +183,7 @@ function HomeView({
     desktopSourcesLoading,
     desktopConfigReady,
     desktopAudioAvailable,
+    desktopCapturePicker,
     desktopAccount,
 }: {
     settings: CaptureSettings;
@@ -196,6 +197,7 @@ function HomeView({
     desktopSourcesLoading: boolean;
     desktopConfigReady: boolean;
     desktopAudioAvailable: boolean;
+    desktopCapturePicker: "window-list" | "system-window";
     desktopAccount: DesktopAccount | null;
 }) {
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -234,29 +236,37 @@ function HomeView({
                                 <strong>Uma janela, uma transmissão</strong>
                                 <span>Somente o aplicativo escolhido será capturado.</span>
                             </div>
-                            <button type="button" className="text-button" onClick={onRefreshDesktopSources}>
-                                Atualizar
-                            </button>
+                            {desktopCapturePicker === "window-list" && (
+                                <button type="button" className="text-button" onClick={onRefreshDesktopSources}>
+                                    Atualizar
+                                </button>
+                            )}
                         </div>
-                        <label className="capture-setting desktop-window-select">
-                            <span>Janela ou aplicativo</span>
-                            <select
-                                value={selectedDesktopSourceId}
-                                onChange={event => onDesktopSourceChange(event.target.value)}
-                                disabled={desktopSourcesLoading || desktopSources.length === 0}
-                            >
-                                {desktopSources.length === 0 && <option value="">{desktopSourcesLoading ? "Procurando janelas…" : "Nenhuma janela disponível"}</option>}
-                                {desktopSources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
-                            </select>
-                        </label>
-                        {selectedDesktopSourceId && desktopSources.find(source => source.id === selectedDesktopSourceId) && (
-                            <div className="desktop-window-preview">
-                                <img src={desktopSources.find(source => source.id === selectedDesktopSourceId)?.thumbnailDataUrl} alt="Prévia da janela selecionada" />
-                                <span>{desktopSources.find(source => source.id === selectedDesktopSourceId)?.name}</span>
-                            </div>
-                        )}
-                        {!desktopAudioAvailable && (
-                            <p className="desktop-audio-note">Áudio isolado do aplicativo disponível no Windows com o capturador nativo instalado. O áudio global do sistema nunca é enviado.</p>
+                        {desktopCapturePicker === "system-window" ? (
+                            <p className="desktop-audio-note">Ao iniciar, escolha uma janela no seletor do sistema. A transmissão do Tauri inclui vídeo, sem áudio do aplicativo ou do sistema.</p>
+                        ) : (
+                            <>
+                                <label className="capture-setting desktop-window-select">
+                                    <span>Janela ou aplicativo</span>
+                                    <select
+                                        value={selectedDesktopSourceId}
+                                        onChange={event => onDesktopSourceChange(event.target.value)}
+                                        disabled={desktopSourcesLoading || desktopSources.length === 0}
+                                    >
+                                        {desktopSources.length === 0 && <option value="">{desktopSourcesLoading ? "Procurando janelas…" : "Nenhuma janela disponível"}</option>}
+                                        {desktopSources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+                                    </select>
+                                </label>
+                                {selectedDesktopSourceId && desktopSources.find(source => source.id === selectedDesktopSourceId) && (
+                                    <div className="desktop-window-preview">
+                                        <img src={desktopSources.find(source => source.id === selectedDesktopSourceId)?.thumbnailDataUrl} alt="Prévia da janela selecionada" />
+                                        <span>{desktopSources.find(source => source.id === selectedDesktopSourceId)?.name}</span>
+                                    </div>
+                                )}
+                                {!desktopAudioAvailable && (
+                                    <p className="desktop-audio-note">Áudio isolado do aplicativo disponível no Windows com o capturador nativo instalado. O áudio global do sistema nunca é enviado.</p>
+                                )}
+                            </>
                         )}
                     </section>
                 )}
@@ -923,7 +933,8 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
             if (sources.includes("screen")) {
                 if (desktopMode) {
                     if (!sourceId) throw new TypeError("Selecione uma janela ou aplicativo para transmitir.");
-                    nextStreams.screen = await captureDesktopWindow(sourceId, settings);
+                    if (!desktopConfig) throw new Error("A configuração desktop ainda não está disponível.");
+                    nextStreams.screen = await captureDesktopWindow(sourceId, settings, desktopConfig);
                 } else {
                     nextStreams.screen = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
                 }
@@ -1162,6 +1173,7 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
                     desktopSourcesLoading={desktopSourcesLoading}
                     desktopConfigReady={!desktopMode || Boolean(desktopConfig)}
                     desktopAudioAvailable={desktopConfig?.isolatedAudioAvailable ?? false}
+                    desktopCapturePicker={desktopConfig?.capturePicker ?? "window-list"}
                     desktopAccount={desktopMode ? desktopAccount : null}
                 />
                 {error && (

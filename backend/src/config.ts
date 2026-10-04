@@ -41,7 +41,7 @@ export function getConfig(): BackendConfig {
     const originValues = process.env.APP_ORIGINS?.split(",")
         .map(origin => origin.trim())
         .filter(Boolean)
-        ?? ["p2pcast-app://desktop", "http://127.0.0.1:5173", "http://localhost:5173"];
+        ?? ["p2pcast-app://desktop", "http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:5173", "http://localhost:5173"];
 
     return {
         port: getPort(),

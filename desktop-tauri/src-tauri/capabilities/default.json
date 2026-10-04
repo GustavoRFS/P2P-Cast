@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Permissões da janela principal do P2P-Cast Tauri",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "deep-link:allow-get-current"
+  ]
+}
