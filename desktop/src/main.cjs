@@ -433,6 +433,7 @@ function registerIpc() {
         if (typeof challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) throw new TypeError("Invalid login challenge");
         const url = new URL(backendUrlFor("/auth/discord"));
         url.searchParams.set("code_challenge", challenge);
+        url.searchParams.set("host", "electron");
         await shell.openExternal(url.toString());
     });
 

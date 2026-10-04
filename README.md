@@ -64,7 +64,7 @@ npm run dev
 
 Durante desenvolvimento, `desktop/config.json` configura o backend e a URL do cliente web. `backendUrl` deve ser o backend acima; `webUrl` deve ser a URL HTTPS onde o app web está publicado. Essa URL é usada nos links que o desktop compartilha, para que espectadores web e Android continuem abrindo a sala pelo fluxo atual. Também é possível definir `P2PCAST_BACKEND_URL`, `P2PCAST_WEB_URL` ou `P2PCAST_CONFIG_PATH` no ambiente.
 
-No app empacotado, coloque `config.json` na pasta `resources` ao lado do executável dentro da pasta de recursos do Electron, ou use `P2PCAST_CONFIG_PATH`. Copie o formato de `desktop/config.example.json` e troque os dois endereços. O app usa o protocolo seguro `p2pcast-app://desktop` para os arquivos locais; o protocolo `p2pcast://` recebe o retorno do login Discord.
+No app empacotado, coloque `config.json` na pasta `resources` ao lado do executável dentro da pasta de recursos do Electron, ou use `P2PCAST_CONFIG_PATH`. Copie o formato de `desktop/config.example.json` e troque os dois endereços. O app usa o protocolo seguro `p2pcast-app://desktop` para os arquivos locais; `p2pcast://` recebe o retorno OAuth do Electron e `p2pcast-tauri://` o do Tauri. O backend prende o host ao `state` OAuth; logins antigos sem identificação de host continuam usando o retorno Electron.
 
 O login Discord é opcional para iniciar uma transmissão. Contas fora da whitelist são recusadas, e usuários anônimos ainda podem transmitir e assistir por link PeerJS. Com login, o app mostra as contas autorizadas que estão transmitindo e permite abrir a live pelo peer ID.
 

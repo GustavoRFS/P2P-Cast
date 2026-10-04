@@ -222,8 +222,13 @@ fn get_login_verifier() -> Result<Option<String>, String> {
     let Some(value) = read_credential(LOGIN_VERIFIER_KEY)? else {
         return Ok(None);
     };
-    let stored: LoginVerifier = serde_json::from_str(&value)
-        .map_err(|error| format!("The saved Discord login verifier is invalid: {error}"))?;
+    let stored: LoginVerifier = match serde_json::from_str(&value) {
+        Ok(stored) => stored,
+        Err(_) => {
+            delete_credential(LOGIN_VERIFIER_KEY)?;
+            return Ok(None);
+        }
+    };
     let current = now_ms()?;
     if !valid_verifier(&stored.verifier)
         || stored.saved_at > current
@@ -233,6 +238,12 @@ fn get_login_verifier() -> Result<Option<String>, String> {
         return Ok(None);
     }
     Ok(Some(stored.verifier))
+}
+
+#[tauri::command]
+fn cleanup_login_verifier() -> Result<(), String> {
+    let _ = get_login_verifier()?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -267,7 +278,8 @@ async fn open_discord_login(app: AppHandle, code_challenge: String) -> Result<()
     let mut url = Url::parse(&format!("{}/auth/discord", config.backend_url))
         .map_err(|error| format!("Could not build Discord login URL: {error}"))?;
     url.query_pairs_mut()
-        .append_pair("code_challenge", &code_challenge);
+        .append_pair("code_challenge", &code_challenge)
+        .append_pair("host", "tauri");
     app.opener()
         .open_url(url.as_str(), None::<&str>)
         .map_err(|error| format!("Could not open Discord login: {error}"))
@@ -288,6 +300,7 @@ pub fn run() {
             save_session,
             clear_session,
             get_login_verifier,
+            cleanup_login_verifier,
             save_login_verifier,
             clear_login_verifier,
             open_discord_login,

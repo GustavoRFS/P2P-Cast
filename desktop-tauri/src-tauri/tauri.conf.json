@@ -38,7 +38,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["p2pcast"]
+        "schemes": ["p2pcast-tauri"]
       }
     }
   }

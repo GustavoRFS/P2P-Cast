@@ -17,7 +17,8 @@ type DiscordUserResponse = {
     avatar?: unknown;
 };
 
-type PendingOAuth = { challenge: string; expiresAt: number };
+type DesktopHost = "electron" | "tauri";
+type PendingOAuth = { challenge: string; host: DesktopHost; expiresAt: number };
 type PendingExchange = { user: DiscordProfile; challenge: string; expiresAt: number };
 
 const OAUTH_STATE_TTL_MS = 5 * 60_000;
@@ -125,7 +126,11 @@ export function createAuthRoutes(config: BackendConfig) {
             }
 
             const state = randomCode();
-            oauthStates.set(state, { challenge: query.code_challenge, expiresAt: Date.now() + OAUTH_STATE_TTL_MS });
+            oauthStates.set(state, {
+                challenge: query.code_challenge,
+                host: query.host ?? "electron",
+                expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
+            });
 
             const authorizationUrl = new URL("https://discord.com/oauth2/authorize");
             authorizationUrl.searchParams.set("client_id", config.discordClientId);
@@ -139,7 +144,10 @@ export function createAuthRoutes(config: BackendConfig) {
             set.headers["cache-control"] = "no-store";
             return "";
         }, {
-            query: t.Object({ code_challenge: t.String({ minLength: 43, maxLength: 43 }) }),
+            query: t.Object({
+                code_challenge: t.String({ minLength: 43, maxLength: 43 }),
+                host: t.Optional(t.Union([t.Literal("electron"), t.Literal("tauri")])),
+            }),
         })
         .get("/auth/discord/callback", async ({ query, set }) => {
             if (query.error) return htmlResponse(400, "Login cancelado", "O Discord não concluiu o login.");
@@ -187,7 +195,8 @@ export function createAuthRoutes(config: BackendConfig) {
 
                 const code = randomCode();
                 exchangeCodes.set(code, { user, challenge: pendingState.challenge, expiresAt: Date.now() + EXCHANGE_CODE_TTL_MS });
-                const deepLink = new URL("p2pcast://auth/callback");
+                const scheme = pendingState.host === "electron" ? "p2pcast" : "p2pcast-tauri";
+                const deepLink = new URL(`${scheme}://auth/callback`);
                 deepLink.searchParams.set("code", code);
                 set.status = 302;
                 set.headers.location = deepLink.toString();

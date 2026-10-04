@@ -14,7 +14,7 @@ type TauriDesktopConfig = {
 function parseAuthCode(rawUrl: string): string | null {
     try {
         const url = new URL(rawUrl);
-        if (url.protocol !== "p2pcast:" || url.hostname !== "auth" || url.pathname !== "/callback") return null;
+        if (url.protocol !== "p2pcast-tauri:" || url.hostname !== "auth" || url.pathname !== "/callback") return null;
         const code = url.searchParams.get("code");
         return code && OAUTH_CODE_PATTERN.test(code) ? code : null;
     } catch {
@@ -24,6 +24,14 @@ function parseAuthCode(rawUrl: string): string | null {
 
 export async function initializeTauriDesktopBridge(): Promise<void> {
     if (!isTauri()) return;
+
+    const cleanExpiredLoginVerifier = () => {
+        void invoke("cleanup_login_verifier").catch(error => {
+            console.error("Could not clean an expired Tauri login verifier:", error);
+        });
+    };
+    cleanExpiredLoginVerifier();
+    window.setInterval(cleanExpiredLoginVerifier, 60_000);
 
     const authCallbacks = new Set<(code: string) => void>();
     const receivedAuthCodes = new Set<string>();

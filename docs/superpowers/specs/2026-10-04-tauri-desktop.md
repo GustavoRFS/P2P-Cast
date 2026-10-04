@@ -9,7 +9,7 @@ Add a Tauri desktop build beside Electron so both hosts use the existing P2P-Cas
 - Use the same `web` renderer, backend endpoints, Discord OAuth/PKCE flow, presence reporting and PeerJS broadcast/view protocol as Electron.
 - Preserve browser-only broadcasting for people who do not sign in.
 - Keep login tokens and the short-lived PKCE verifier in the operating system credential store.
-- Register and handle the `p2pcast://auth/callback` deep link.
+- Register and handle the `p2pcast-tauri://auth/callback` deep link, separate from Electron's existing `p2pcast://` callback. Bind the selected host to the backend's OAuth state.
 - Package the same web build in a separate Tauri host under `desktop-tauri/`.
 
 ## Capture behavior and comparison caveat
