@@ -293,7 +293,7 @@ pub fn run() {
             open_discord_login,
         ])
         .setup(|app| {
-            #[cfg(any(windows, target_os = "linux"))]
+            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;
             Ok(())
         })

@@ -27,7 +27,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "dmg", "appimage"],
     "category": "SocialNetworking",
     "shortDescription": "Transmissão P2P entre amigos",
     "windows": {
