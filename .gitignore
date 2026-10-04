@@ -1,5 +1,7 @@
 .vercel
 node_modules
 .env*
+!.env.example
 .playwright-mcp
 .worktrees/
+backend/whitelist.json

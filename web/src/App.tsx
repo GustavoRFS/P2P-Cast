@@ -35,6 +35,8 @@ import {
     type ChatMessage,
 } from "./lib/chat";
 import { createChatNotificationPlayer, type ChatNotificationPlayer } from "./lib/chat-sound";
+import { captureDesktopWindow, getDesktopConfig, isDesktopApp, listDesktopWindows, releaseDesktopCapture, type DesktopConfig, type DesktopWindow } from "./lib/desktop";
+import { useDesktopAccount, type DesktopAccount } from "./lib/desktop-account";
 import { createPeer, sendPeerLeave } from "./lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "./lib/receiver";
 import { buildWatchUrl, loadBroadcastId, parseWatchId, saveBroadcastId } from "./lib/room";
@@ -93,7 +95,10 @@ const EMPTY_CAPTURE_STREAMS: CaptureStreams = {
 };
 
 function stopCaptureStreams(streams: CaptureStreams) {
-    Object.values(streams).forEach(stopTracks);
+    Object.values(streams).forEach(stream => {
+        releaseDesktopCapture(stream);
+        stopTracks(stream);
+    });
 }
 
 function getStreamForSource(streams: CaptureStreams, source: CaptureTrackSource) {
@@ -170,10 +175,28 @@ function HomeView({
     settings,
     onSettingsChange,
     onStart,
+    desktopMode,
+    desktopSources,
+    selectedDesktopSourceId,
+    onDesktopSourceChange,
+    onRefreshDesktopSources,
+    desktopSourcesLoading,
+    desktopConfigReady,
+    desktopAudioAvailable,
+    desktopAccount,
 }: {
     settings: CaptureSettings;
     onSettingsChange: Dispatch<SetStateAction<CaptureSettings>>;
-    onStart: (settings: CaptureSettings) => void;
+    onStart: (settings: CaptureSettings, selectedDesktopSourceId?: string) => void;
+    desktopMode: boolean;
+    desktopSources: DesktopWindow[];
+    selectedDesktopSourceId: string;
+    onDesktopSourceChange: (sourceId: string) => void;
+    onRefreshDesktopSources: () => void;
+    desktopSourcesLoading: boolean;
+    desktopConfigReady: boolean;
+    desktopAudioAvailable: boolean;
+    desktopAccount: DesktopAccount | null;
 }) {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const settingsSummary = formatCaptureSettings(settings);
@@ -204,6 +227,42 @@ function HomeView({
                     Uma transmissão simples para explicar aquela jogada,
                     mostrar um bug ou acompanhar a partida com a galera.
                 </p>
+                {desktopMode && (
+                    <section className="desktop-window-picker" aria-label="Selecionar aplicativo para compartilhar">
+                        <div className="desktop-panel-heading">
+                            <div>
+                                <strong>Uma janela, uma transmissão</strong>
+                                <span>Somente o aplicativo escolhido será capturado.</span>
+                            </div>
+                            <button type="button" className="text-button" onClick={onRefreshDesktopSources}>
+                                Atualizar
+                            </button>
+                        </div>
+                        <label className="capture-setting desktop-window-select">
+                            <span>Janela ou aplicativo</span>
+                            <select
+                                value={selectedDesktopSourceId}
+                                onChange={event => onDesktopSourceChange(event.target.value)}
+                                disabled={desktopSourcesLoading || desktopSources.length === 0}
+                            >
+                                {desktopSources.length === 0 && <option value="">{desktopSourcesLoading ? "Procurando janelas…" : "Nenhuma janela disponível"}</option>}
+                                {desktopSources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+                            </select>
+                        </label>
+                        {selectedDesktopSourceId && desktopSources.find(source => source.id === selectedDesktopSourceId) && (
+                            <div className="desktop-window-preview">
+                                <img src={desktopSources.find(source => source.id === selectedDesktopSourceId)?.thumbnailDataUrl} alt="Prévia da janela selecionada" />
+                                <span>{desktopSources.find(source => source.id === selectedDesktopSourceId)?.name}</span>
+                            </div>
+                        )}
+                        {!desktopAudioAvailable && (
+                            <p className="desktop-audio-note">Áudio isolado do aplicativo disponível no Windows com o capturador nativo instalado. O áudio global do sistema nunca é enviado.</p>
+                        )}
+                    </section>
+                )}
+                {desktopMode && desktopAccount && (
+                    <DesktopAccountPanel account={desktopAccount} />
+                )}
                 <div className="capture-settings">
                     <button
                         className="settings-toggle"
@@ -309,7 +368,7 @@ function HomeView({
                                     </select>
                                 </label>
                                 {settings.source !== "camera" && <label className="capture-setting">
-                                    <span>Áudio da tela</span>
+                                    <span>{desktopMode ? "Áudio do aplicativo escolhido" : "Áudio da tela"}</span>
                                     <select
                                         value={settings.audio ? "on" : "off"}
                                         onChange={event => onSettingsChange(current => ({
@@ -317,7 +376,7 @@ function HomeView({
                                             audio: event.target.value === "on",
                                         }))}
                                     >
-                                        <option value="on">Ligado</option>
+                                        <option value="on" disabled={desktopMode && !desktopAudioAvailable}>Ligado</option>
                                         <option value="off">Desligado</option>
                                     </select>
                                 </label>
@@ -358,13 +417,17 @@ function HomeView({
                         </div>
                     )}
                 </div>
-                <button className="button button-primary button-large" onClick={() => onStart(settings)}>
+                <button
+                    className="button button-primary button-large"
+                    onClick={() => onStart(settings, selectedDesktopSourceId || undefined)}
+                    disabled={desktopMode && (!desktopConfigReady || (settings.source !== "camera" && !selectedDesktopSourceId))}
+                >
                     <span>Iniciar transmissão</span>
                     <span className="button-arrow" aria-hidden="true">↗</span>
                 </button>
                 <p className="microcopy">
                     <span aria-hidden="true">⌁</span>
-                    sem upload · sem login · feito para poucos amigos
+                    {desktopMode ? "login opcional · amigos ao vivo · vídeo P2P" : "sem upload · sem login · feito para poucos amigos"}
                 </p>
             </section>
 
@@ -420,6 +483,45 @@ function HomeView({
                 </div>
             </section>
         </main>
+    );
+}
+
+function DesktopAccountPanel({ account }: { account: DesktopAccount }) {
+    return (
+        <section className="desktop-account-panel" aria-label="Conta Discord e amigos ao vivo">
+            <div className="desktop-panel-heading">
+                <div>
+                    <strong>{account.user ? `Conectado como ${account.user.username}` : "Amigos ao vivo"}</strong>
+                    <span>{account.user ? "Presença sincronizada com a sua lista" : "Entre no Discord para ver quem está transmitindo"}</span>
+                </div>
+                {account.user ? (
+                    <button type="button" className="text-button" onClick={() => void account.signOut()}>Sair</button>
+                ) : (
+                    <button type="button" className="button button-secondary button-small" onClick={() => void account.signIn()}>
+                        {account.loading ? "Carregando…" : "Entrar com Discord"}
+                    </button>
+                )}
+            </div>
+            {account.error && <p className="desktop-account-error" role="status">{account.error}</p>}
+            {!account.user ? (
+                <p className="desktop-account-empty">Login é opcional. Você pode transmitir sem entrar.</p>
+            ) : account.liveUsers.length === 0 ? (
+                <p className="desktop-account-empty">Ninguém da whitelist está ao vivo agora.</p>
+            ) : (
+                <div className="desktop-live-users">
+                    {account.liveUsers.map(user => (
+                        <button key={`${user.id}:${user.peerId}`} type="button" className="desktop-live-user" onClick={() => account.watch(user.peerId)}>
+                            {user.avatar ? <img src={user.avatar} alt="" /> : <span className="desktop-user-avatar" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>}
+                            <span className="desktop-live-user-copy">
+                                <strong>{user.username}</strong>
+                                <small>{user.activity || "Transmitindo agora"}</small>
+                            </span>
+                            <span className="desktop-live-dot" aria-label="Ao vivo" />
+                        </button>
+                    ))}
+                </div>
+            )}
+        </section>
     );
 }
 
@@ -654,11 +756,17 @@ function ChatPanel({
     );
 }
 
-function BroadcastView() {
+function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | null }) {
+    const desktopMode = isDesktopApp();
+    const setLivePeer = desktopAccount?.setLivePeer;
     const [mode, setMode] = useState<StreamMode>("idle");
     const [error, setError] = useState<AppError | null>(null);
     const [localStreams, setLocalStreams] = useState<CaptureStreams>(EMPTY_CAPTURE_STREAMS);
     const [captureSettings, setCaptureSettings] = useState<CaptureSettings>(loadCaptureSettings);
+    const [desktopConfig, setDesktopConfig] = useState<DesktopConfig | null>(null);
+    const [desktopSources, setDesktopSources] = useState<DesktopWindow[]>([]);
+    const [selectedDesktopSourceId, setSelectedDesktopSourceId] = useState("");
+    const [desktopSourcesLoading, setDesktopSourcesLoading] = useState(desktopMode);
     const [shareUrl, setShareUrl] = useState<string | null>(null);
     const [viewerCount, setViewerCount] = useState(0);
     const [copied, setCopied] = useState(false);
@@ -678,6 +786,41 @@ function BroadcastView() {
     const chatOpenRef = useRef(false);
     const chatSoundEnabledRef = useRef(chatSoundEnabled);
     const chatSoundPlayerRef = useRef<ChatNotificationPlayer | null>(null);
+
+    const refreshDesktopSources = useCallback(async () => {
+        if (!desktopMode) return;
+        setDesktopSourcesLoading(true);
+        try {
+            const sources = await listDesktopWindows();
+            setDesktopSources(sources);
+            setSelectedDesktopSourceId(current => sources.some(source => source.id === current) ? current : sources[0]?.id ?? "");
+        } catch {
+            setDesktopSources([]);
+            setSelectedDesktopSourceId("");
+            setError({ title: "Não foi possível listar as janelas", message: "Confira as permissões de captura de tela do sistema e atualize a lista." });
+        } finally {
+            setDesktopSourcesLoading(false);
+        }
+    }, [desktopMode]);
+
+    useEffect(() => {
+        if (!desktopMode) return;
+        let active = true;
+        void getDesktopConfig().then(config => {
+            if (!active || !config) return;
+            setDesktopConfig(config);
+            if (!config.isolatedAudioAvailable) {
+                setCaptureSettings(current => current.audio ? { ...current, audio: false } : current);
+            }
+        }).catch(() => {
+            if (active) setError({ title: "Configuração desktop indisponível", message: "A captura de janela ainda funciona, mas não foi possível ler as opções de áudio isolado." });
+        });
+        return () => { active = false; };
+    }, [desktopMode]);
+
+    useEffect(() => {
+        void refreshDesktopSources();
+    }, [refreshDesktopSources]);
 
     useEffect(() => {
         const player = createChatNotificationPlayer();
@@ -728,6 +871,7 @@ function BroadcastView() {
     }, []);
 
     const stopBroadcast = useCallback(() => {
+        setLivePeer?.(null);
         const peer = peerRef.current;
         peerRef.current = null;
 
@@ -749,9 +893,12 @@ function BroadcastView() {
         setChatOpen(false);
         setChatUnread(0);
         setMode("idle");
-    }, []);
+    }, [setLivePeer]);
 
-    const startBroadcast = useCallback(async (settings: CaptureSettings = captureSettings) => {
+    const startBroadcast = useCallback(async (
+        settings: CaptureSettings = captureSettings,
+        sourceId: string | undefined = selectedDesktopSourceId || undefined,
+    ) => {
         setMode("starting");
         setError(null);
         setCopied(false);
@@ -774,7 +921,12 @@ function BroadcastView() {
             }
 
             if (sources.includes("screen")) {
-                nextStreams.screen = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
+                if (desktopMode) {
+                    if (!sourceId) throw new TypeError("Selecione uma janela ou aplicativo para transmitir.");
+                    nextStreams.screen = await captureDesktopWindow(sourceId, settings);
+                } else {
+                    nextStreams.screen = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
+                }
             }
             if (sources.includes("camera")) {
                 nextStreams.camera = await navigator.mediaDevices.getUserMedia(buildCameraMediaOptions(settings));
@@ -793,7 +945,9 @@ function BroadcastView() {
 
             peer.on("open", id => {
                 saveBroadcastId(id);
-                setShareUrl(buildWatchUrl(window.location.origin, window.location.pathname, id));
+                const shareOrigin = desktopMode ? desktopConfig?.webUrl ?? window.location.origin : window.location.origin;
+                setShareUrl(buildWatchUrl(shareOrigin, desktopMode ? "/" : window.location.pathname, id));
+                setLivePeer?.(id);
                 setMode("broadcasting");
             });
 
@@ -896,7 +1050,23 @@ function BroadcastView() {
             setError(getMediaError(captureError, settings.source));
             setMode("error");
         }
-    }, [captureSettings, stopBroadcast, updateViewerCount]);
+    }, [captureSettings, desktopConfig, desktopMode, selectedDesktopSourceId, setLivePeer, stopBroadcast, updateViewerCount]);
+
+    useEffect(() => {
+        const onDesktopAudioError = (event: Event) => {
+            const message = event instanceof CustomEvent && typeof event.detail === "string"
+                ? event.detail
+                : "A captura do áudio deste aplicativo foi interrompida.";
+            stopBroadcast();
+            setError({
+                title: "Áudio isolado interrompido",
+                message: `${message} A transmissão foi encerrada para evitar trocar para o áudio global do sistema.`,
+            });
+            setMode("error");
+        };
+        window.addEventListener("p2pcast:application-audio-error", onDesktopAudioError);
+        return () => window.removeEventListener("p2pcast:application-audio-error", onDesktopAudioError);
+    }, [stopBroadcast]);
 
     useEffect(() => {
         const videoBindings = [
@@ -978,16 +1148,29 @@ function BroadcastView() {
 
     if (mode === "idle" || mode === "error") {
         return (
-            <div className="page-shell">
+            <div className={desktopMode ? "page-shell desktop-shell" : "page-shell"}>
                 <AppHeader />
                 <HomeView
                     settings={captureSettings}
                     onSettingsChange={setCaptureSettings}
                     onStart={startBroadcast}
+                    desktopMode={desktopMode}
+                    desktopSources={desktopSources}
+                    selectedDesktopSourceId={selectedDesktopSourceId}
+                    onDesktopSourceChange={setSelectedDesktopSourceId}
+                    onRefreshDesktopSources={() => void refreshDesktopSources()}
+                    desktopSourcesLoading={desktopSourcesLoading}
+                    desktopConfigReady={!desktopMode || Boolean(desktopConfig)}
+                    desktopAudioAvailable={desktopConfig?.isolatedAudioAvailable ?? false}
+                    desktopAccount={desktopMode ? desktopAccount : null}
                 />
                 {error && (
                     <div className="floating-error">
-                        <ErrorCard error={error} onRetry={startBroadcast} onHome={goHome} />
+                        <ErrorCard
+                            error={error}
+                            onRetry={() => startBroadcast(captureSettings, selectedDesktopSourceId || undefined)}
+                            onHome={goHome}
+                        />
                     </div>
                 )}
             </div>
@@ -995,7 +1178,7 @@ function BroadcastView() {
     }
 
     return (
-        <div className="page-shell">
+        <div className={desktopMode ? "page-shell desktop-shell" : "page-shell"}>
             <AppHeader eyebrow="TRANSMISSOR" />
             <main className="room-layout">
                 <div className="room-heading">
@@ -1525,11 +1708,14 @@ function AndroidAppBanner() {
 
 export default function App() {
     const broadcastId = parseWatchId(window.location.search);
+    const desktopAccount = useDesktopAccount();
 
     return (
         <>
             <AndroidAppBanner />
-            {broadcastId ? <ViewerView broadcastId={broadcastId} /> : <BroadcastView />}
+            {broadcastId
+                ? <ViewerView broadcastId={broadcastId} />
+                : <BroadcastView desktopAccount={isDesktopApp() ? desktopAccount : null} />}
         </>
     );
 }

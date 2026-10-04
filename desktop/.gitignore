@@ -1,0 +1,5 @@
+node_modules/
+release/
+config.json
+resources/config.json
+native/windows/build/
