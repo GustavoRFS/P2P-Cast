@@ -15,6 +15,7 @@ import com.p2pcast.android.signaling.newConnectionId
 import com.p2pcast.android.signaling.parseCandidate
 import com.p2pcast.android.signaling.parseSdp
 import com.p2pcast.android.util.getPeerError
+import com.p2pcast.android.util.ViewerIdentityStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,6 +66,7 @@ class RtcViewerSession(
     )
 
     private val localId = UUID.randomUUID().toString()
+    private val viewerId = ViewerIdentityStore(context).loadOrCreate()
     private var signaling: PeerSignalingClient? = null
     private var broadcastId: String? = null
     private val mediaLinks = mutableMapOf<CaptureTrackSource, PeerLink>()
@@ -73,13 +75,14 @@ class RtcViewerSession(
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun connect(broadcastId: String) {
+        val viewerSessionId = UUID.randomUUID().toString()
         this.broadcastId = broadcastId
         _mode.value = StreamMode.CONNECTING
         _error.value = null
 
         val client = PeerSignalingClient(localId, scope)
         signaling = client
-        wireSignaling(client, broadcastId)
+        wireSignaling(client, broadcastId, viewerSessionId)
         client.connect()
     }
 
@@ -89,12 +92,12 @@ class RtcViewerSession(
         connect(id)
     }
 
-    private fun wireSignaling(client: PeerSignalingClient, broadcastId: String) {
+    private fun wireSignaling(client: PeerSignalingClient, broadcastId: String, viewerSessionId: String) {
         client.onOpen = {
             listOf(CaptureTrackSource.SCREEN, CaptureTrackSource.CAMERA).forEach { source ->
-                callForMedia(client, broadcastId, source)
+                callForMedia(client, broadcastId, source, viewerSessionId)
             }
-            openChatConnection(client, broadcastId)
+            openChatConnection(client, broadcastId, viewerSessionId)
         }
         client.onAnswer = { _, payload -> handleAnswer(payload) }
         client.onCandidate = { _, payload -> handleCandidate(payload) }
@@ -111,7 +114,12 @@ class RtcViewerSession(
         }
     }
 
-    private fun callForMedia(client: PeerSignalingClient, broadcastId: String, source: CaptureTrackSource) {
+    private fun callForMedia(
+        client: PeerSignalingClient,
+        broadcastId: String,
+        source: CaptureTrackSource,
+        viewerSessionId: String,
+    ) {
         val connectionId = newConnectionId("mc")
         var link: PeerLink? = null
 
@@ -142,6 +150,8 @@ class RtcViewerSession(
                     val metadata = buildJsonObject {
                         put("role", "viewer")
                         put("source", if (source == CaptureTrackSource.CAMERA) "camera" else "screen")
+                        put("viewerId", viewerId)
+                        put("viewerSessionId", viewerSessionId)
                     }
                     client.sendSignal(
                         PeerMessageType.OFFER,
@@ -154,7 +164,7 @@ class RtcViewerSession(
         )
     }
 
-    private fun openChatConnection(client: PeerSignalingClient, broadcastId: String) {
+    private fun openChatConnection(client: PeerSignalingClient, broadcastId: String, viewerSessionId: String) {
         val connectionId = newConnectionId("dc")
         var link: PeerLink? = null
 
@@ -174,7 +184,11 @@ class RtcViewerSession(
             LambdaSdpObserver(
                 onCreated = { offer ->
                     pc.setLocalDescription(NoopSdpObserver, offer)
-                    val metadata = buildJsonObject { put("role", CHAT_CONNECTION_ROLE) }
+                    val metadata = buildJsonObject {
+                        put("role", CHAT_CONNECTION_ROLE)
+                        put("viewerId", viewerId)
+                        put("viewerSessionId", viewerSessionId)
+                    }
                     client.sendSignal(
                         PeerMessageType.OFFER,
                         broadcastId,

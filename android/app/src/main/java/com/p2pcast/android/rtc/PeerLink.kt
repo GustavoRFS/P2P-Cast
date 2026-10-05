@@ -26,6 +26,7 @@ class PeerLink(
 ) {
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private var remoteDescriptionSet = false
+    private var closed = false
 
     var dataChannel: DataChannel? = null
     var onDataMessage: ((String) -> Unit)? = null
@@ -39,7 +40,11 @@ class PeerLink(
         )
     }
 
-    fun applyRemoteDescription(sdp: SessionDescription, onSet: () -> Unit = {}) {
+    fun applyRemoteDescription(
+        sdp: SessionDescription,
+        onFailure: (String?) -> Unit = {},
+        onSet: () -> Unit = {},
+    ) {
         pc.setRemoteDescription(
             object : SdpObserver {
                 override fun onSetSuccess() {
@@ -51,7 +56,7 @@ class PeerLink(
 
                 override fun onCreateSuccess(p0: SessionDescription?) {}
                 override fun onCreateFailure(p0: String?) {}
-                override fun onSetFailure(p0: String?) {}
+                override fun onSetFailure(p0: String?) = onFailure.invoke(p0)
             },
             sdp,
         )
@@ -82,7 +87,10 @@ class PeerLink(
         channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), false))
     }
 
+    @Synchronized
     fun close() {
+        if (closed) return
+        closed = true
         dataChannel?.close()
         pc.close()
         onClosed?.invoke()

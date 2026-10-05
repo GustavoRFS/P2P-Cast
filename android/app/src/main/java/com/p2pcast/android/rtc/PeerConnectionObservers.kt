@@ -21,13 +21,14 @@ open class RoutingPeerConnectionObserver(
     private val onIceCandidate: (IceCandidate) -> Unit = {},
     private val onDataChannel: (DataChannel) -> Unit = {},
     private val onTrackReceived: (RtpTransceiver) -> Unit = {},
+    private val onIceConnectionStateChanged: (PeerConnection.IceConnectionState?) -> Unit = {},
 ) : PeerConnection.Observer {
     override fun onIceCandidate(candidate: IceCandidate) = onIceCandidate.invoke(candidate)
     override fun onDataChannel(channel: DataChannel) = onDataChannel.invoke(channel)
     override fun onTrack(transceiver: RtpTransceiver) = onTrackReceived.invoke(transceiver)
 
     override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+    override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) = onIceConnectionStateChanged.invoke(state)
     override fun onIceConnectionReceivingChange(receiving: Boolean) {}
     override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
     override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}

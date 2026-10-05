@@ -44,6 +44,10 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoTrack
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+
+private const val MAX_MEDIA_CONNECTIONS_PER_SESSION = 2
+private data class MediaViewerReservation(val viewerId: String, val sessionId: String)
 
 /**
  * Android counterpart of App.tsx's `startBroadcast` — owns local capture
@@ -91,7 +95,9 @@ class RtcBroadcastSession(
     private var surfaceTextureHelperCamera: SurfaceTextureHelper? = null
 
     private var settings: CaptureSettings = CaptureSettings.DEFAULT
-    private val mediaLinks = mutableMapOf<String, PeerLink>()
+    private val mediaLinks = ConcurrentHashMap<String, PeerLink>()
+    private val mediaViewerReservations = mutableMapOf<String, MediaViewerReservation>()
+    private val mediaAdmissionLock = Any()
     private val chatLinks = mutableMapOf<String, PeerLink>()
     private var chatViewerIndex = 0
     private val json = Json { ignoreUnknownKeys = true }
@@ -197,25 +203,67 @@ class RtcBroadcastSession(
             val role = metadataOf(payload)?.get("role")?.jsonPrimitive?.contentOrNull
             if (role == CHAT_CONNECTION_ROLE) answerChatOffer(src, connectionId, sdp, serializationOf(payload))
         } else {
-            val requestedSource = metadataOf(payload)?.get("source")?.jsonPrimitive?.contentOrNull
-            answerMediaOffer(src, connectionId, sdp, requestedSource)
+            val metadata = metadataOf(payload)
+            val requestedSource = metadata?.get("source")?.jsonPrimitive?.contentOrNull
+            val viewerId = metadata?.get("viewerId")?.jsonPrimitive?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && it.length <= 128 }
+                ?.let { "viewer:$it" }
+                ?: "peer:$src"
+            val viewerSessionId = metadata?.get("viewerSessionId")?.jsonPrimitive?.contentOrNull
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && it.length <= 128 }
+                ?.let { "session:$it" }
+                ?: "peer:$src"
+            answerMediaOffer(src, connectionId, sdp, requestedSource, viewerId, viewerSessionId)
         }
     }
 
-    private fun answerMediaOffer(src: String, connectionId: String, sdp: org.webrtc.SessionDescription, requestedSource: String?) {
+    private fun answerMediaOffer(
+        src: String,
+        connectionId: String,
+        sdp: org.webrtc.SessionDescription,
+        requestedSource: String?,
+        viewerId: String,
+        viewerSessionId: String,
+    ) {
         val wantsCamera = requestedSource == "camera"
         val videoTrack = if (wantsCamera) _localCameraTrack.value else _localScreenTrack.value
         val signalingClient = signaling ?: return
         if (videoTrack == null) return
 
+        if (!reserveMediaConnection(connectionId, viewerId, viewerSessionId)) {
+            signalingClient.sendLeave(src)
+            return
+        }
+
         var link: PeerLink? = null
         val pc = engine.factory.createPeerConnection(
             rtcConfig(),
-            RoutingPeerConnectionObserver(onIceCandidate = { candidate -> link?.sendLocalIceCandidate(candidate) }),
-        ) ?: return
+            RoutingPeerConnectionObserver(
+                onIceCandidate = { candidate -> link?.sendLocalIceCandidate(candidate) },
+                onIceConnectionStateChanged = { state ->
+                    if (state == PeerConnection.IceConnectionState.FAILED ||
+                        state == PeerConnection.IceConnectionState.CLOSED
+                    ) {
+                        link?.close()
+                    }
+                },
+            ),
+        )
+        if (pc == null) {
+            releaseMediaConnection(connectionId)
+            return
+        }
 
-        link = PeerLink(connectionId, PeerConnectionType.MEDIA, src, pc, signalingClient)
-        mediaLinks[connectionId] = link
+        val mediaLink = PeerLink(connectionId, PeerConnectionType.MEDIA, src, pc, signalingClient)
+        link = mediaLink
+        mediaLinks[connectionId] = mediaLink
+        mediaLink.onClosed = {
+            mediaLinks.remove(connectionId, mediaLink)
+            releaseMediaConnection(connectionId)
+            updateViewerCount()
+        }
 
         // A track added with no stream ID arrives on the browser side with an
         // empty `event.streams` — peerjs's ontrack handler reads
@@ -229,7 +277,7 @@ class RtcBroadcastSession(
         pc.addTrack(videoTrack, listOf(streamId))
         if (wantsCamera) micAudioTrack?.let { pc.addTrack(it, listOf(streamId)) }
 
-        link.applyRemoteDescription(sdp) {
+        mediaLink.applyRemoteDescription(sdp, onFailure = { mediaLink.close() }) {
             pc.createAnswer(
                 LambdaSdpObserver(
                     onCreated = { answer ->
@@ -241,12 +289,33 @@ class RtcBroadcastSession(
                         )
                         BitrateController.apply(pc, settings.bitrate)
                     },
+                    onFailure = { mediaLink.close() },
                 ),
                 MediaConstraints(),
             )
         }
 
         updateViewerCount()
+    }
+
+    private fun reserveMediaConnection(connectionId: String, viewerId: String, sessionId: String): Boolean =
+        synchronized(mediaAdmissionLock) {
+            val activeSessions = mediaViewerReservations.values.filter { it.viewerId == viewerId }
+            if (connectionId in mediaViewerReservations ||
+                activeSessions.size >= MAX_MEDIA_CONNECTIONS_PER_SESSION ||
+                activeSessions.any { it.sessionId != sessionId }
+            ) {
+                false
+            } else {
+                mediaViewerReservations[connectionId] = MediaViewerReservation(viewerId, sessionId)
+                true
+            }
+        }
+
+    private fun releaseMediaConnection(connectionId: String) {
+        synchronized(mediaAdmissionLock) {
+            mediaViewerReservations.remove(connectionId)
+        }
     }
 
     private fun answerChatOffer(src: String, connectionId: String, sdp: org.webrtc.SessionDescription, serialization: String?) {
@@ -327,7 +396,7 @@ class RtcBroadcastSession(
     }
 
     private fun handlePeerLeft(src: String) {
-        mediaLinks.filterValues { it.remotePeerId == src }.forEach { (id, link) -> link.close(); mediaLinks.remove(id) }
+        mediaLinks.values.filter { it.remotePeerId == src }.forEach { it.close() }
         chatLinks.filterValues { it.remotePeerId == src }.forEach { (id, link) -> link.close(); chatLinks.remove(id) }
         updateViewerCount()
     }
@@ -353,6 +422,7 @@ class RtcBroadcastSession(
     override fun stop() {
         mediaLinks.values.forEach { it.close() }
         mediaLinks.clear()
+        synchronized(mediaAdmissionLock) { mediaViewerReservations.clear() }
         chatLinks.values.forEach { it.close() }
         chatLinks.clear()
         signaling?.close()

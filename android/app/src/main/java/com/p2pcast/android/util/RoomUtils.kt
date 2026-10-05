@@ -3,6 +3,7 @@ package com.p2pcast.android.util
 import android.content.Context
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.UUID
 
 /** Kotlin port of src/lib/room.ts. The web app encodes the broadcast peer id
  * as a `?watch=<id>` query param; the Android app accepts either a bare id or
@@ -13,6 +14,7 @@ import java.net.URLEncoder
 private const val PREFS_NAME = "p2pcast_prefs"
 private const val KEY_BROADCAST_ID = "room.broadcast_id"
 private const val KEY_WEB_ORIGIN = "room.web_origin"
+private const val KEY_VIEWER_ID = "viewer.id"
 private const val WATCH_PARAM = "watch"
 
 fun parseWatchId(input: String): String? {
@@ -52,6 +54,21 @@ class BroadcastIdStore(context: Context) {
 
     fun save(id: String) {
         prefs.edit().putString(KEY_BROADCAST_ID, id).apply()
+    }
+}
+
+class ViewerIdentityStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun loadOrCreate(): String = synchronized(identityLock) {
+        prefs.getString(KEY_VIEWER_ID, null)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: UUID.randomUUID().toString().also { id ->
+                prefs.edit().putString(KEY_VIEWER_ID, id).apply()
+            }
+    }
+
+    private companion object {
+        val identityLock = Any()
     }
 }
 
