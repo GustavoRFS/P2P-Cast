@@ -1,15 +1,16 @@
 export const colors = {
   background: '#07111f',
   panel: '#0e1d31',
-  panelRaised: '#12243a',
+  panelRaised: '#0f2035',
   videoStage: '#030a12',
   border: 'rgba(173, 211, 255, 0.15)',
   text: '#e6f2ff',
-  muted: '#93a9c2',
+  muted: '#89a1bb',
+  mutedBright: '#aec1d7',
   cyan: '#75e5e0',
-  green: '#66d6a1',
-  blue: '#86bdf9',
-  danger: '#ff7883',
+  green: '#9ff1af',
+  blue: '#91b7ff',
+  danger: '#ff9898',
   onAccent: '#07131f',
 } as const;
 

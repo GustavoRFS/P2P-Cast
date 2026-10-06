@@ -66,8 +66,8 @@ export function formatCaptureSettings(settings: CaptureSettings): string {
   const audio = settings.source === 'camera'
     ? settings.microphone ? 'com microfone' : 'sem microfone'
     : settings.source === 'both'
-      ? `${settings.screenAudio ? 'áudio da tela' : 'sem áudio da tela'} · ${settings.microphone ? 'microfone' : 'sem microfone'}`
-      : settings.screenAudio ? 'com áudio da tela' : 'sem áudio da tela';
+      ? `áudio da tela indisponível · ${settings.microphone ? 'microfone' : 'sem microfone'}`
+      : 'áudio da tela indisponível';
 
   return `${source} · ${resolution} · ${settings.fps} FPS · ${bitrate} · ${audio}`;
 }
