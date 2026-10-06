@@ -2,6 +2,7 @@ export const colors = {
   background: '#07111f',
   panel: '#0e1d31',
   panelRaised: '#12243a',
+  videoStage: '#030a12',
   border: 'rgba(173, 211, 255, 0.15)',
   text: '#e6f2ff',
   muted: '#93a9c2',

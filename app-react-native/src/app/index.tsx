@@ -10,28 +10,8 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { parseWatchTarget } from '@/domain/room';
 import { colors, radius, spacing } from '@/theme/tokens';
-
-function parseWatchTarget(input: string): string | null {
-  const value = input.trim();
-  if (!value) return null;
-
-  const appLink = value.match(/^p2pcast-react-native:\/\/watch\/([^?#]+)/i);
-  if (appLink?.[1]) return decodeURIComponent(appLink[1]).trim() || null;
-
-  const queryStart = value.indexOf('?');
-  if (queryStart >= 0) {
-    const query = value.slice(queryStart + 1).split('#', 1)[0];
-    const parameter = query
-      .split('&')
-      .map((part) => part.split('=', 2))
-      .find(([key]) => key === 'watch');
-    if (!parameter?.[1]) return null;
-    return decodeURIComponent(parameter[1].replace(/\+/g, ' ')).trim() || null;
-  }
-
-  return value.includes('://') ? null : value;
-}
 
 export default function HomeScreen() {
   const params = useLocalSearchParams<{ watch?: string | string[] }>();

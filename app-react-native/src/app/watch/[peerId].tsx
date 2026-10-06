@@ -32,7 +32,7 @@ const styles = StyleSheet.create({
   backButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center' },
   backText: { color: colors.cyan, fontSize: 15, fontWeight: '600' },
   content: { flex: 1, justifyContent: 'center', gap: spacing.md, paddingBottom: spacing.xxxl },
-  stage: { width: '100%', aspectRatio: 16 / 9, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: '#030a12', gap: spacing.md },
+  stage: { width: '100%', aspectRatio: 16 / 9, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, backgroundColor: colors.videoStage, gap: spacing.md },
   status: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   statusDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: colors.cyan },
   statusText: { color: colors.cyan, fontSize: 9, fontWeight: '700', letterSpacing: 1.1 },
