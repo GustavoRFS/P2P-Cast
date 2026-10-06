@@ -2,8 +2,15 @@ package expo.modules.p2pcastmedia
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.p2pcastmedia.capture.CaptureSettings
 
 class P2PCastMediaModule : Module() {
+  private var sessionController: SessionController? = null
+
+  private fun controller(): SessionController = requireNotNull(sessionController) {
+    "O controlador de mídia nativo ainda não foi inicializado."
+  }
+
   override fun definition() = ModuleDefinition {
     Name("P2PCastMedia")
 
@@ -18,40 +25,56 @@ class P2PCastMediaModule : Module() {
       "pipModeChanged"
     )
 
-    AsyncFunction("requestCapturePermissions") { _: Map<String, Any> ->
+    OnCreate {
+      val context = requireNotNull(appContext.reactContext) { "O contexto React Native não está disponível." }
+      sessionController = SessionController(context) { eventName, payload ->
+        runCatching { sendEvent(eventName, payload) }
+      }
+    }
+
+    OnDestroy {
+      sessionController?.close()
+      sessionController = null
+    }
+
+    AsyncFunction("requestCapturePermissions") { _: Map<String, Any?> ->
       throw IllegalStateException("O controlador de permissões ainda não foi inicializado.")
     }
 
-    AsyncFunction("startBroadcast") { _: Map<String, Any>, _: String ->
-      throw IllegalStateException("O motor de transmissão ainda não foi inicializado.")
+    AsyncFunction("startBroadcast") { rawSettings: Map<String, Any?>, webOrigin: String ->
+      val settings = CaptureSettings.fromBridge(rawSettings)
+      controller().startBroadcast(settings, webOrigin)
     }
 
-    AsyncFunction("startViewer") { _: Map<String, String> ->
-      throw IllegalStateException("O motor de visualização ainda não foi inicializado.")
+    AsyncFunction("startViewer") { options: Map<String, String> ->
+      val broadcastId = requireNotNull(options["broadcastId"]) { "O ID da transmissão está ausente." }
+      val viewerId = requireNotNull(options["viewerId"]) { "O ID do espectador está ausente." }
+      val viewerSessionId = requireNotNull(options["viewerSessionId"]) { "O ID da sessão está ausente." }
+      controller().startViewer(broadcastId, viewerId, viewerSessionId)
     }
 
     AsyncFunction("stopSession") {
-      // Stop remains idempotent when no session has been created.
+      sessionController?.stopSession()
     }
 
     AsyncFunction("retryViewer") {
-      throw IllegalStateException("Não há uma sessão de visualização ativa para tentar novamente.")
+      controller().retryViewer()
     }
 
-    AsyncFunction("setMicrophoneMuted") { _: Boolean ->
-      throw IllegalStateException("Não há uma sessão de transmissão ativa.")
+    AsyncFunction("setMicrophoneMuted") { muted: Boolean ->
+      controller().setMicrophoneMuted(muted)
     }
 
-    AsyncFunction("setViewerAudio") { _: Boolean, _: Double ->
-      throw IllegalStateException("Não há uma sessão de visualização ativa.")
+    AsyncFunction("setViewerAudio") { enabled: Boolean, volume: Double ->
+      controller().setViewerAudio(enabled, volume)
     }
 
     AsyncFunction("flipCamera") {
-      throw IllegalStateException("Não há uma câmera ativa para alternar.")
+      controller().flipCamera()
     }
 
-    AsyncFunction("sendChatMessage") { _: String, _: String? ->
-      throw IllegalStateException("O chat ainda não está conectado.")
+    AsyncFunction("sendChatMessage") { text: String, name: String? ->
+      controller().sendChatMessage(text, name)
     }
 
     AsyncFunction("enterPictureInPicture") {
