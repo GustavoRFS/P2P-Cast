@@ -4,6 +4,7 @@ O projeto mantém três clientes compatíveis com o mesmo protocolo PeerJS:
 
 - `web/`: React/Vite para transmitir e assistir pelo navegador.
 - `android/`: aplicativo Android atual.
+- `app-react-native/`: cliente Expo/React Native Android separado, com módulo Kotlin para captura de tela/câmera, vídeo WebRTC, PiP e EAS Update. Consulte [o README do app](app-react-native/README.md) para desenvolvimento, builds e publicação OTA.
 - `desktop/`: cliente Electron que reaproveita a interface React. Ele mantém os mesmos links PeerJS, adiciona login Discord opcional e mostra usuários autorizados ao vivo.
 - `backend/`: serviço Bun/Elysia para OAuth Discord, whitelist JSON e presença em tempo real. Ele não recebe vídeo nem áudio.
 

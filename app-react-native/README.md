@@ -1,56 +1,41 @@
-# Welcome to your Expo app 👋
+# P2P-Cast para Android (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Este app Expo é um cliente Android separado de `../android/`. Ele usa Expo Router e uma Expo Module Kotlin local para compartilhar a tela ou câmera, negociar vídeo WebRTC compatível com os outros clientes P2P-Cast, mostrar o chat e reproduzir a live em Picture-in-Picture.
 
-## Get started
+## Desenvolvimento
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+npm ci
+npx eas-cli@latest build --platform android --profile development
+npx expo start --dev-client
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+O módulo Kotlin de captura e renderização não funciona no Expo Go. Instale o development build antes de iniciar o bundler com `--dev-client`. A captura de tela usa o diálogo de consentimento do Android; câmera e microfone pedem permissões quando a fonte selecionada precisa delas.
 
-### Other setup steps
+O áudio interno da tela aparece como indisponível nesta versão. O microfone é enviado como uma faixa separada junto com a câmera quando ativado. Para espectadores, o áudio começa desligado e pode ser ativado nos controles.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Builds EAS
 
-## Learn more
+O projeto EAS é [`gustavorfsdev/app-react-native`](https://expo.dev/accounts/gustavorfsdev/projects/app-react-native). O arquivo `eas.json` define os canais `development`, `preview` e `production`:
 
-To learn more about developing your project with Expo, look at the following resources:
+```sh
+npx eas-cli@latest build --platform android --profile preview
+npx eas-cli@latest build --platform android --profile production
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Os profiles `preview` e `production` usam distribuição interna e de loja, respectivamente, e cada um tem seu próprio canal OTA.
 
-## Join the community
+## EAS Update (OTA)
 
-Join our community of developers creating universal apps.
+O app usa `expo-updates`, runtime version com política `appVersion` e o projeto EAS configurado no `app.json`. Publique alterações de JavaScript, estilos e assets em um canal compatível:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```sh
+npx eas-cli@latest update --channel preview --platform android --message "Descreva a atualização" --environment preview
+npx eas-cli@latest update --channel production --platform android --message "Descreva a atualização" --environment production
+```
+
+O build instalado precisa ter sido criado com o mesmo canal e runtime version. Uma versão release pode iniciar com o bundle atual enquanto baixa o update; feche o app e abra-o novamente para aplicar o conteúdo baixado.
+
+Alterações no módulo Kotlin, permissões, configuração Android, dependências nativas ou SDK precisam de um novo build. Como o runtime segue `expo.version`, aumente essa versão ao preparar uma nova geração nativa e distribua o build antes de publicar updates para ela. Não publique um update destinado a uma geração nova no canal de builds antigos.
+
+O setup deste repositório não publica updates nem inicia builds. Uma conta Expo autenticada é necessária para operações EAS.
