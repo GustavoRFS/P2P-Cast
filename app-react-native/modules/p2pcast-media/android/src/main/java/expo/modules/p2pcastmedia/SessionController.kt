@@ -2,6 +2,7 @@ package expo.modules.p2pcastmedia
 
 import android.content.Context
 import android.content.Intent
+import expo.modules.p2pcastmedia.capture.CaptureSource
 import expo.modules.p2pcastmedia.capture.CaptureSettings
 import expo.modules.p2pcastmedia.capture.CaptureTrackSource
 import expo.modules.p2pcastmedia.rtc.BroadcastSession
@@ -10,6 +11,7 @@ import expo.modules.p2pcastmedia.rtc.RemoteMedia
 import expo.modules.p2pcastmedia.rtc.RtcViewerSession
 import expo.modules.p2pcastmedia.rtc.ViewerSession
 import expo.modules.p2pcastmedia.rtc.WebRtcEngine
+import expo.modules.p2pcastmedia.service.StreamForegroundService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +34,7 @@ class SessionController(
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val engine = WebRtcEngine(appContext)
   private val observers = mutableListOf<Job>()
+  val eglContext get() = engine.eglBaseContext
 
   private var sessionId: String? = null
   private var broadcast: BroadcastSession? = null
@@ -40,24 +43,32 @@ class SessionController(
   private var viewerId: String? = null
   private var viewerSessionId: String? = null
 
-  fun startBroadcast(
+  suspend fun startBroadcast(
     settings: CaptureSettings,
     webOrigin: String,
     mediaProjectionResult: Pair<Int, Intent>? = null,
   ): String {
     stopSession()
+    val needsScreen = settings.source == CaptureSource.SCREEN || settings.source == CaptureSource.BOTH
+    require(!needsScreen || mediaProjectionResult != null) { "A permissão de captura de tela ainda não foi concedida." }
+    StreamForegroundService.startAndAwait(appContext, foregroundRole(settings))
     val id = UUID.randomUUID().toString()
-    val nativeSession = engine.createBroadcastSession(scope, mediaProjectionResult, webOrigin)
-    sessionId = id
-    broadcast = nativeSession
-    observeBroadcast(id, nativeSession)
-    emitEvent("screenAudioCapabilityChanged", mapOf(
-      "available" to false,
-      "reason" to "O Android não disponibilizou áudio da tela para esta sessão.",
-      "sessionId" to id,
-    ))
-    nativeSession.start(settings)
-    return id
+    try {
+      val nativeSession = engine.createBroadcastSession(scope, mediaProjectionResult, webOrigin)
+      sessionId = id
+      broadcast = nativeSession
+      observeBroadcast(id, nativeSession)
+      emitEvent("screenAudioCapabilityChanged", mapOf(
+        "available" to false,
+        "reason" to "O Android não disponibilizou áudio da tela para esta sessão.",
+        "sessionId" to id,
+      ))
+      nativeSession.start(settings)
+      return id
+    } catch (error: Throwable) {
+      StreamForegroundService.stop(appContext)
+      throw error
+    }
   }
 
   fun startViewer(broadcastId: String, viewerId: String, viewerSessionId: String): String {
@@ -81,6 +92,7 @@ class SessionController(
         val payload = mutableMapOf<String, Any?>("mode" to mode.name.lowercase(), "sessionId" to id)
         if (error != null) payload["error"] = mapOf("code" to "session-error", "message" to "${error.title}: ${error.message}")
         emitEvent("stateChanged", payload)
+        if (mode == StreamMode.ERROR) StreamForegroundService.stop(appContext)
       }
     }
     observers += scope.launch {
@@ -211,8 +223,77 @@ class SessionController(
     return hasVideo && activeViewer.mode.value == StreamMode.WATCHING
   }
 
+  fun publishSnapshot(eventName: String) {
+    val id = sessionId
+    if (id == null) {
+      if (eventName == "stateChanged") emitEvent("stateChanged", mapOf("mode" to "idle"))
+      return
+    }
+
+    val broadcastSession = broadcast
+    val viewerSession = viewer
+    when (eventName) {
+      "stateChanged" -> {
+        val mode = broadcastSession?.mode?.value ?: viewerSession?.mode?.value ?: StreamMode.IDLE
+        val error = broadcastSession?.error?.value ?: viewerSession?.error?.value
+        val payload = mutableMapOf<String, Any?>("mode" to mode.name.lowercase(), "sessionId" to id)
+        if (error != null) payload["error"] = mapOf("code" to "session-error", "message" to "${error.title}: ${error.message}")
+        emitEvent("stateChanged", payload)
+      }
+      "shareUrlChanged" -> broadcastSession?.shareUrl?.value?.let { url ->
+        emitEvent("shareUrlChanged", mapOf("url" to url, "sessionId" to id))
+      }
+      "viewerCountChanged" -> emitEvent("viewerCountChanged", mapOf("count" to (broadcastSession?.viewerCount?.value ?: 0), "sessionId" to id))
+      "trackChanged" -> {
+        val local = broadcastSession != null
+        val screenAvailable = broadcastSession?.localScreenTrack?.value != null || viewerSession?.remoteScreen?.value?.videoTrack != null
+        val cameraAvailable = broadcastSession?.localCameraTrack?.value != null || viewerSession?.remoteCamera?.value?.videoTrack != null
+        emitTrack(id, CaptureTrackSource.SCREEN, screenAvailable, local)
+        emitTrack(id, CaptureTrackSource.CAMERA, cameraAvailable, local)
+      }
+      "chatReadyChanged" -> {
+        val ready = broadcastSession?.chat?.canSend?.value ?: viewerSession?.chat?.canSend?.value ?: false
+        emitEvent("chatReadyChanged", mapOf("ready" to ready, "sessionId" to id))
+      }
+      "chatMessage" -> {
+        val messages = broadcastSession?.chat?.messages?.value ?: viewerSession?.chat?.messages?.value.orEmpty()
+        messages.forEach { emitChatMessage(id, it) }
+      }
+      "screenAudioCapabilityChanged" -> emitEvent("screenAudioCapabilityChanged", mapOf(
+        "available" to false,
+        "reason" to "O Android não disponibilizou áudio da tela para esta sessão.",
+        "sessionId" to id,
+      ))
+    }
+  }
+
+  private fun foregroundRole(settings: CaptureSettings): String = when (settings.source) {
+    CaptureSource.SCREEN -> StreamForegroundService.ROLE_SCREEN
+    CaptureSource.CAMERA -> if (settings.microphone)
+      StreamForegroundService.ROLE_CAMERA_MICROPHONE else StreamForegroundService.ROLE_CAMERA
+    CaptureSource.BOTH -> if (settings.microphone)
+      StreamForegroundService.ROLE_BOTH_MICROPHONE else StreamForegroundService.ROLE_BOTH
+  }
+
+  private fun emitChatMessage(id: String, display: DisplayChatMessage) {
+    val message = display.message
+    emitEvent("chatMessage", mapOf(
+      "sessionId" to id,
+      "id" to message.id,
+      "authorName" to message.authorName,
+      "text" to message.text,
+      "timestamp" to message.timestamp,
+      "isBroadcaster" to message.isBroadcaster,
+      "isSelf" to display.isSelf,
+    ))
+  }
+
   fun stopSession() {
-    val stoppedId = sessionId ?: return
+    val stoppedId = sessionId
+    if (stoppedId == null) {
+      StreamForegroundService.stop(appContext)
+      return
+    }
     val wasLocal = broadcast != null
     observers.forEach { it.cancel() }
     observers.clear()
@@ -224,6 +305,7 @@ class SessionController(
     viewerId = null
     viewerSessionId = null
     sessionId = null
+    StreamForegroundService.stop(appContext)
     emitEvent("trackChanged", mapOf("source" to "screen", "available" to false, "local" to wasLocal, "sessionId" to stoppedId))
     emitEvent("trackChanged", mapOf("source" to "camera", "available" to false, "local" to wasLocal, "sessionId" to stoppedId))
     emitEvent("viewerCountChanged", mapOf("count" to 0, "sessionId" to stoppedId))

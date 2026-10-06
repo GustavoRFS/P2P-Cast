@@ -30,6 +30,7 @@ class PeerLink(
 
     var dataChannel: DataChannel? = null
     var onDataMessage: ((String) -> Unit)? = null
+    var onDataChannelOpen: (() -> Unit)? = null
     var onClosed: (() -> Unit)? = null
 
     fun sendLocalIceCandidate(candidate: IceCandidate) {
@@ -71,7 +72,9 @@ class PeerLink(
         channel.registerObserver(
             object : DataChannel.Observer {
                 override fun onBufferedAmountChange(previousAmount: Long) {}
-                override fun onStateChange() {}
+                override fun onStateChange() {
+                    if (channel.state() == DataChannel.State.OPEN) onDataChannelOpen?.invoke()
+                }
                 override fun onMessage(buffer: DataChannel.Buffer) {
                     val bytes = ByteArray(buffer.data.remaining())
                     buffer.data.get(bytes)
@@ -79,10 +82,12 @@ class PeerLink(
                 }
             },
         )
+        if (channel.state() == DataChannel.State.OPEN) onDataChannelOpen?.invoke()
     }
 
     fun sendData(text: String) {
         val channel = dataChannel ?: return
+        if (channel.state() != DataChannel.State.OPEN) return
         val bytes = text.toByteArray(Charsets.UTF_8)
         channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), false))
     }

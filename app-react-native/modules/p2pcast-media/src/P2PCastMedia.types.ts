@@ -14,7 +14,7 @@ export type NativeMediaEventMap = {
   shareUrlChanged: { url: string; sessionId: string };
   viewerCountChanged: { count: number; sessionId: string };
   trackChanged: { source: CaptureTrackSource; available: boolean; local: boolean; sessionId: string };
-  chatMessage: ChatMessage & { sessionId: string };
+  chatMessage: ChatMessage & { sessionId: string; isSelf: boolean };
   chatReadyChanged: { ready: boolean; sessionId: string };
   screenAudioCapabilityChanged: { available: boolean; reason?: string; sessionId?: string };
   pipModeChanged: { isInPictureInPictureMode: boolean };

@@ -27,6 +27,7 @@
     },
     "plugins": [
       "expo-router",
+      "./modules/p2pcast-media/app.plugin.js",
       [
         "expo-splash-screen",
         {

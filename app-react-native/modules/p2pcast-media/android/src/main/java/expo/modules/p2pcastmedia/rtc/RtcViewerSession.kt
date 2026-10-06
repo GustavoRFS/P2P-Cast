@@ -181,6 +181,7 @@ class RtcViewerSession(
 
         link = PeerLink(connectionId, PeerConnectionType.DATA, broadcastId, pc, client)
         chatLink = link
+        link.onDataChannelOpen = { chat.setCanSend(true) }
 
         val channel = pc.createDataChannel(connectionId, DataChannel.Init())
         link.attachDataChannelObserver(channel)
@@ -207,7 +208,6 @@ class RtcViewerSession(
                             reliable = true,
                         ),
                     )
-                    chat.setCanSend(true)
                 },
             ),
             MediaConstraints(),

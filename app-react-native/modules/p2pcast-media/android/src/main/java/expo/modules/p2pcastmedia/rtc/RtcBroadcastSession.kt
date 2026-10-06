@@ -37,11 +37,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.webrtc.AudioTrack
+import org.webrtc.AudioSource
 import org.webrtc.CameraVideoCapturer
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
+import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -91,8 +93,12 @@ class RtcBroadcastSession(
     private var screenCapturer: VideoCapturer? = null
     private var cameraCapturer: CameraVideoCapturer? = null
     private var micAudioTrack: AudioTrack? = null
+    private var micAudioSource: AudioSource? = null
+    private var screenVideoSource: VideoSource? = null
+    private var cameraVideoSource: VideoSource? = null
     private var surfaceTextureHelperScreen: SurfaceTextureHelper? = null
     private var surfaceTextureHelperCamera: SurfaceTextureHelper? = null
+    @Volatile private var stopping = false
 
     private var settings: CaptureSettings = CaptureSettings.DEFAULT
     private val mediaLinks = ConcurrentHashMap<String, PeerLink>()
@@ -107,6 +113,8 @@ class RtcBroadcastSession(
         try {
             setUpLocalTracks(settings)
         } catch (t: Throwable) {
+            stopping = true
+            cleanupSession()
             _error.value = AppError("Não foi possível iniciar", t.message ?: "Falha ao preparar a captura.")
             _mode.value = StreamMode.ERROR
             return
@@ -124,9 +132,10 @@ class RtcBroadcastSession(
 
         if (source == CaptureSource.SCREEN || source == CaptureSource.BOTH) {
             val data = mediaProjectionData ?: error("Permissão de captura de tela não concedida")
-            val capturer = ScreenCapturerFactory.create(data) { scope.launch { stop() } }
+            val capturer = ScreenCapturerFactory.create(data) { scope.launch { onProjectionRevoked() } }
             screenCapturer = capturer
             val videoSource = engine.factory.createVideoSource(true)
+            screenVideoSource = videoSource
             val helper = SurfaceTextureHelper.create("ScreenCaptureThread", engine.eglBaseContext)
             surfaceTextureHelperScreen = helper
             capturer.initialize(helper, context, videoSource.capturerObserver)
@@ -140,6 +149,7 @@ class RtcBroadcastSession(
                 ?: error("Nenhuma câmera disponível")
             cameraCapturer = capturer
             val videoSource = engine.factory.createVideoSource(false)
+            cameraVideoSource = videoSource
             val helper = SurfaceTextureHelper.create("CameraCaptureThread", engine.eglBaseContext)
             surfaceTextureHelperCamera = helper
             capturer.initialize(helper, context, videoSource.capturerObserver)
@@ -149,6 +159,7 @@ class RtcBroadcastSession(
 
             if (settings.microphone) {
                 val audioSource = engine.factory.createAudioSource(MediaConstraints())
+                micAudioSource = audioSource
                 micAudioTrack = engine.factory.createAudioTrack("camera_a_$localId", audioSource)
             }
         }
@@ -181,8 +192,13 @@ class RtcBroadcastSession(
         client.onLeave = { src -> handlePeerLeft(src) }
         client.onExpire = { src -> handlePeerLeft(src) }
         client.onError = { type ->
-            _error.value = getPeerError(type)
-            _mode.value = StreamMode.ERROR
+            scope.launch {
+                if (stopping || _mode.value == StreamMode.IDLE || _mode.value == StreamMode.ERROR) return@launch
+                stopping = true
+                cleanupSession()
+                _error.value = getPeerError(type)
+                _mode.value = StreamMode.ERROR
+            }
         }
         client.onDisconnected = {
             if (_mode.value != StreamMode.ERROR) {
@@ -420,6 +436,24 @@ class RtcBroadcastSession(
     }
 
     override fun stop() {
+        stopping = true
+        cleanupSession()
+        _error.value = null
+        _mode.value = StreamMode.IDLE
+    }
+
+    private fun onProjectionRevoked() {
+        if (stopping || _mode.value == StreamMode.IDLE || _mode.value == StreamMode.ERROR) return
+        stopping = true
+        cleanupSession()
+        _error.value = AppError(
+            "Compartilhamento de tela encerrado",
+            "O Android encerrou a permissão de captura. Inicie uma nova transmissão para continuar.",
+        )
+        _mode.value = StreamMode.ERROR
+    }
+
+    private fun cleanupSession() {
         mediaLinks.values.forEach { it.close() }
         mediaLinks.clear()
         synchronized(mediaAdmissionLock) { mediaViewerReservations.clear() }
@@ -430,16 +464,28 @@ class RtcBroadcastSession(
         chat.reset()
 
         runCatching { screenCapturer?.stopCapture() }
-        screenCapturer?.dispose()
+        runCatching { screenCapturer?.dispose() }
         runCatching { cameraCapturer?.stopCapture() }
-        cameraCapturer?.dispose()
-        surfaceTextureHelperScreen?.dispose()
-        surfaceTextureHelperCamera?.dispose()
-
+        runCatching { cameraCapturer?.dispose() }
+        runCatching { _localScreenTrack.value?.dispose() }
+        runCatching { _localCameraTrack.value?.dispose() }
+        runCatching { micAudioTrack?.dispose() }
+        runCatching { screenVideoSource?.dispose() }
+        runCatching { cameraVideoSource?.dispose() }
+        runCatching { micAudioSource?.dispose() }
+        runCatching { surfaceTextureHelperScreen?.dispose() }
+        runCatching { surfaceTextureHelperCamera?.dispose() }
         _localScreenTrack.value = null
         _localCameraTrack.value = null
+        screenCapturer = null
+        cameraCapturer = null
+        micAudioTrack = null
+        micAudioSource = null
+        screenVideoSource = null
+        cameraVideoSource = null
+        surfaceTextureHelperScreen = null
+        surfaceTextureHelperCamera = null
         _viewerCount.value = 0
         _shareUrl.value = null
-        _mode.value = StreamMode.IDLE
     }
 }

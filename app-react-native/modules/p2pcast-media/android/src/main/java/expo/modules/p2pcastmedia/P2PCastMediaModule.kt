@@ -2,10 +2,22 @@ package expo.modules.p2pcastmedia
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.activityresult.AppContextActivityResultLauncher
+import expo.modules.p2pcastmedia.capture.CapturePermissionController
+import expo.modules.p2pcastmedia.capture.CaptureSource
 import expo.modules.p2pcastmedia.capture.CaptureSettings
+import expo.modules.p2pcastmedia.capture.RuntimePermissionsContract
+import expo.modules.p2pcastmedia.capture.ScreenCaptureConsentContract
+import expo.modules.p2pcastmedia.service.SessionRegistry
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 
 class P2PCastMediaModule : Module() {
   private var sessionController: SessionController? = null
+  private var capturePermissionController: CapturePermissionController? = null
+  private lateinit var runtimePermissionLauncher: AppContextActivityResultLauncher<ArrayList<String>, Map<String, Boolean>>
+  private lateinit var screenCaptureLauncher: AppContextActivityResultLauncher<Boolean, Pair<Int, Intent?>>
 
   private fun controller(): SessionController = requireNotNull(sessionController) {
     "O controlador de mídia nativo ainda não foi inicializado."
@@ -25,25 +37,75 @@ class P2PCastMediaModule : Module() {
       "pipModeChanged"
     )
 
+    RegisterActivityContracts {
+      runtimePermissionLauncher = registerForActivityResult(RuntimePermissionsContract())
+      screenCaptureLauncher = registerForActivityResult(ScreenCaptureConsentContract())
+    }
+
     OnCreate {
       val context = requireNotNull(appContext.reactContext) { "O contexto React Native não está disponível." }
-      sessionController = SessionController(context) { eventName, payload ->
+      sessionController = SessionRegistry.attach(context) { eventName, payload ->
         runCatching { sendEvent(eventName, payload) }
       }
+      capturePermissionController = CapturePermissionController(context, runtimePermissionLauncher, screenCaptureLauncher)
     }
 
     OnDestroy {
-      sessionController?.close()
+      SessionRegistry.detach(sessionController)
       sessionController = null
+      capturePermissionController = null
     }
 
-    AsyncFunction("requestCapturePermissions") { _: Map<String, Any?> ->
-      throw IllegalStateException("O controlador de permissões ainda não foi inicializado.")
+    OnStartObserving("stateChanged") {
+      sessionController?.publishSnapshot("stateChanged")
+    }
+    OnStartObserving("shareUrlChanged") {
+      sessionController?.publishSnapshot("shareUrlChanged")
+    }
+    OnStartObserving("viewerCountChanged") {
+      sessionController?.publishSnapshot("viewerCountChanged")
+    }
+    OnStartObserving("trackChanged") {
+      sessionController?.publishSnapshot("trackChanged")
+    }
+    OnStartObserving("chatMessage") {
+      sessionController?.publishSnapshot("chatMessage")
+    }
+    OnStartObserving("chatReadyChanged") {
+      sessionController?.publishSnapshot("chatReadyChanged")
+    }
+    OnStartObserving("screenAudioCapabilityChanged") {
+      sessionController?.publishSnapshot("screenAudioCapabilityChanged")
+    }
+    OnStartObserving("pipModeChanged") {
+      emitPipMode()
+    }
+
+    OnActivityEntersBackground {
+      publishPipModeAfterActivityTransition()
+    }
+    OnActivityEntersForeground {
+      publishPipModeAfterActivityTransition()
+    }
+
+    AsyncFunction("requestCapturePermissions") { rawSettings: Map<String, Any?> ->
+      val settings = CaptureSettings.fromBridge(rawSettings)
+      requireNotNull(capturePermissionController) { "O controlador de permissões não está disponível." }
+        .request(settings)
+        .toBridgeMap()
     }
 
     AsyncFunction("startBroadcast") { rawSettings: Map<String, Any?>, webOrigin: String ->
       val settings = CaptureSettings.fromBridge(rawSettings)
-      controller().startBroadcast(settings, webOrigin)
+      val permissions = requireNotNull(capturePermissionController) { "O controlador de permissões não está disponível." }
+      require(permissions.hasRequiredRuntimePermissions(settings)) { "As permissões de câmera ou microfone foram revogadas." }
+      val projectionResult = if (settings.source == CaptureSource.SCREEN || settings.source == CaptureSource.BOTH) {
+        requireNotNull(SessionRegistry.takeProjectionGrant()) { "A captura de tela precisa de autorização do Android." }
+      } else {
+        SessionRegistry.clearProjectionGrant()
+        null
+      }
+      controller().startBroadcast(settings, webOrigin, projectionResult)
     }
 
     AsyncFunction("startViewer") { options: Map<String, String> ->
@@ -54,6 +116,7 @@ class P2PCastMediaModule : Module() {
     }
 
     AsyncFunction("stopSession") {
+      SessionRegistry.clearProjectionGrant()
       sessionController?.stopSession()
     }
 
@@ -78,7 +141,7 @@ class P2PCastMediaModule : Module() {
     }
 
     AsyncFunction("enterPictureInPicture") {
-      false
+      PictureInPictureController.enter(appContext.currentActivity, controller().isViewerVideoActive())
     }
 
     View(P2PCastMediaView::class) {
@@ -88,5 +151,24 @@ class P2PCastMediaModule : Module() {
       Prop("mirror") { view: P2PCastMediaView, value: Boolean? -> view.mirror = value ?: false }
       OnViewDestroys { view: P2PCastMediaView -> view.detach() }
     }
+  }
+
+  private fun publishPipModeAfterActivityTransition() {
+    val activity = appContext.currentActivity ?: return
+    Handler(Looper.getMainLooper()).postDelayed({
+      emitPipMode()
+    }, PIP_STATE_DELAY_MS)
+  }
+
+  private fun emitPipMode() {
+    runCatching {
+      sendEvent("pipModeChanged", mapOf(
+        "isInPictureInPictureMode" to PictureInPictureController.isInPictureInPictureMode(appContext.currentActivity),
+      ))
+    }
+  }
+
+  private companion object {
+    const val PIP_STATE_DELAY_MS = 200L
   }
 }
