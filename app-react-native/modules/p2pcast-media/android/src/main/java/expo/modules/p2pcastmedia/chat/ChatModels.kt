@@ -41,12 +41,8 @@ fun formatMessageTime(timestamp: Long): String {
     return formatter.format(timestamp)
 }
 
-fun shouldPlayChatNotification(chatOpen: Boolean, soundEnabled: Boolean): Boolean =
-    !chatOpen && soundEnabled
-
 private const val PREFS_NAME = "p2pcast_prefs"
 private const val KEY_VIEWER_NAME = "chat.viewer_name"
-private const val KEY_CHAT_SOUND = "chat.sound_enabled"
 private const val KEY_VIEWER_VOLUME = "chat.viewer_volume"
 
 class ChatPreferencesStore(context: Context) {
@@ -56,12 +52,6 @@ class ChatPreferencesStore(context: Context) {
 
     fun saveViewerName(name: String) {
         prefs.edit().putString(KEY_VIEWER_NAME, name.trim()).apply()
-    }
-
-    fun loadChatSoundEnabled(): Boolean = prefs.getBoolean(KEY_CHAT_SOUND, true)
-
-    fun saveChatSoundEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_CHAT_SOUND, enabled).apply()
     }
 
     fun loadViewerVolume(): Float = prefs.getFloat(KEY_VIEWER_VOLUME, 1f).coerceIn(0f, 1f)

@@ -25,6 +25,7 @@ import expo.modules.p2pcastmedia.util.BroadcastIdStore
 import expo.modules.p2pcastmedia.util.buildWatchUrl
 import expo.modules.p2pcastmedia.util.getPeerError
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -145,7 +146,7 @@ class RtcBroadcastSession(
         }
 
         if (source == CaptureSource.CAMERA || source == CaptureSource.BOTH) {
-            val capturer = CameraCapturerFactory.create(context, settings.cameraFacing, noopCameraEvents())
+            val capturer = CameraCapturerFactory.create(context, settings.cameraFacing, cameraEvents())
                 ?: error("Nenhuma câmera disponível")
             cameraCapturer = capturer
             val videoSource = engine.factory.createVideoSource(false)
@@ -171,13 +172,37 @@ class RtcBroadcastSession(
         return width to height
     }
 
-    private fun noopCameraEvents() = object : CameraVideoCapturer.CameraEventsHandler {
-        override fun onCameraError(errorDescription: String?) {}
-        override fun onCameraDisconnected() {}
-        override fun onCameraFreezed(errorDescription: String?) {}
+    private fun cameraEvents() = object : CameraVideoCapturer.CameraEventsHandler {
+        override fun onCameraError(errorDescription: String?) {
+            onCameraCaptureFailure(errorDescription?.takeIf { it.isNotBlank() } ?: "A câmera apresentou um erro.")
+        }
+
+        override fun onCameraDisconnected() {
+            onCameraCaptureFailure("A câmera foi desconectada.")
+        }
+
+        override fun onCameraFreezed(errorDescription: String?) {
+            onCameraCaptureFailure(errorDescription?.takeIf { it.isNotBlank() } ?: "A imagem da câmera parou de atualizar.")
+        }
+
         override fun onCameraOpening(cameraName: String?) {}
         override fun onFirstFrameAvailable() {}
         override fun onCameraClosed() {}
+    }
+
+    private fun onCameraCaptureFailure(reason: String) {
+        // Camera callbacks can arrive from WebRTC's capture thread. Queue cleanup
+        // onto the session dispatcher so it cannot interrupt track initialization.
+        scope.launch(Dispatchers.Main) {
+            if (stopping || _mode.value == StreamMode.IDLE || _mode.value == StreamMode.ERROR) return@launch
+            stopping = true
+            cleanupSession()
+            _error.value = AppError(
+                "Câmera indisponível",
+                "$reason A transmissão foi encerrada para não continuar sem a fonte de vídeo selecionada.",
+            )
+            _mode.value = StreamMode.ERROR
+        }
     }
 
     private fun wireSignaling(client: PeerSignalingClient) {

@@ -8,7 +8,6 @@ export interface ChatMessage {
 
 export const CHAT_CONNECTION_ROLE = 'chat';
 export const CHAT_NAME_STORAGE_KEY = 'p2pcast.viewer-name';
-export const CHAT_SOUND_STORAGE_KEY = 'p2pcast.chat-sound';
 export const VIEWER_VOLUME_STORAGE_KEY = 'p2pcast.viewer-volume';
 export const CHAT_MAX_MESSAGE_LENGTH = 500;
 export const CHAT_MAX_NAME_LENGTH = 40;
@@ -23,10 +22,6 @@ export function sanitizeChatName(value: string): string {
 
 export function resolveAuthorName(value: string | undefined, viewerIndex: number): string {
   return sanitizeChatName(value ?? '') || `Espectador ${viewerIndex}`;
-}
-
-export function shouldPlayChatNotification(chatOpen: boolean, soundEnabled: boolean): boolean {
-  return !chatOpen && soundEnabled;
 }
 
 export function formatMessageTime(timestamp: number): string {

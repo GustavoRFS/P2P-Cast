@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { createViewerSessionId } from '@/domain/room';
-import { loadChatSoundEnabled, loadOrCreateViewerId, loadViewerName, loadViewerVolume, saveChatSoundEnabled, saveViewerName, saveViewerVolume } from '@/storage/preferences';
+import { loadOrCreateViewerId, loadViewerName, loadViewerVolume, saveViewerName, saveViewerVolume } from '@/storage/preferences';
 import { sanitizeChatName, sanitizeChatText } from '@/domain/chat';
 import { P2PCastMedia } from '../../modules/p2pcast-media';
 import { useMediaSession } from './MediaSessionProvider';
@@ -11,7 +11,6 @@ export function useViewerSession(broadcastId: string) {
   const [viewerName, setViewerName] = useState('');
   const [audioEnabled, setAudioEnabledState] = useState(false);
   const [volume, setVolumeState] = useState(1);
-  const [chatSoundEnabled, setChatSoundEnabled] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const viewerRef = useRef<{ viewerId: string; viewerSessionId: string } | null>(null);
   const connectionGeneration = useRef(0);
@@ -25,17 +24,15 @@ export function useViewerSession(broadcastId: string) {
     const generation = expectedGeneration ?? ++connectionGeneration.current;
     setConnectionError(null);
     try {
-      const [viewerId, nativeName, savedVolume, soundEnabled] = await Promise.all([
+      const [viewerId, nativeName, savedVolume] = await Promise.all([
         loadOrCreateViewerId(),
         loadViewerName(),
         loadViewerVolume(),
-        loadChatSoundEnabled(),
       ]);
       if (connectionGeneration.current !== generation) return;
       const viewerSessionId = createViewerSessionId();
       setViewerName(nativeName);
       setVolumeState(savedVolume);
-      setChatSoundEnabled(soundEnabled);
       await P2PCastMedia.startViewer({ broadcastId: cleanId, viewerId, viewerSessionId });
       if (connectionGeneration.current !== generation) {
         await P2PCastMedia.stopSession();
@@ -90,11 +87,6 @@ export function useViewerSession(broadcastId: string) {
     void saveViewerName(safeName);
   }, []);
 
-  const setChatSound = useCallback((enabled: boolean) => {
-    setChatSoundEnabled(enabled);
-    void saveChatSoundEnabled(enabled);
-  }, []);
-
   const sendChatMessage = useCallback((text: string) => {
     const cleanText = sanitizeChatText(text);
     if (!cleanText) return Promise.resolve();
@@ -108,10 +100,8 @@ export function useViewerSession(broadcastId: string) {
     audioEnabled,
     volume,
     viewerName,
-    chatSoundEnabled,
     connectionError,
     setName,
-    setChatSound,
     setVolume,
     setAudioEnabled,
     sendChatMessage,

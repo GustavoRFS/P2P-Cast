@@ -4,7 +4,6 @@ import { DEFAULT_CAPTURE_SETTINGS, isCaptureSettings, type CaptureSettings } fro
 import {
   CHAT_MAX_NAME_LENGTH,
   CHAT_NAME_STORAGE_KEY,
-  CHAT_SOUND_STORAGE_KEY,
   VIEWER_VOLUME_STORAGE_KEY,
   sanitizeChatName,
 } from '@/domain/chat';
@@ -64,14 +63,6 @@ export async function loadViewerVolume(): Promise<number> {
 export async function saveViewerVolume(volume: number): Promise<void> {
   const safeVolume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1;
   await write(VIEWER_VOLUME_STORAGE_KEY, String(safeVolume));
-}
-
-export async function loadChatSoundEnabled(): Promise<boolean> {
-  return (await read(CHAT_SOUND_STORAGE_KEY)) !== 'off';
-}
-
-export async function saveChatSoundEnabled(enabled: boolean): Promise<void> {
-  await write(CHAT_SOUND_STORAGE_KEY, enabled ? 'on' : 'off');
 }
 
 export async function loadBroadcastId(): Promise<string | null> {

@@ -74,12 +74,14 @@ class RtcViewerSession(
     private var broadcastId: String? = null
     private var viewerAudioEnabled = false
     private var viewerAudioVolume = 1f
+    private var ending = false
     private val mediaLinks = mutableMapOf<CaptureTrackSource, PeerLink>()
     private var chatLink: PeerLink? = null
     private val receivedMediaSources = mutableSetOf<CaptureTrackSource>()
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun connect(broadcastId: String, viewerId: String, viewerSessionId: String) {
+        ending = false
         this.viewerId = viewerId
         this.viewerSessionId = viewerSessionId
         this.broadcastId = broadcastId
@@ -107,11 +109,11 @@ class RtcViewerSession(
         }
         client.onAnswer = { _, payload -> handleAnswer(payload) }
         client.onCandidate = { _, payload -> handleCandidate(payload) }
-        client.onLeave = { fail("peer-unavailable") }
-        client.onExpire = { fail("peer-unavailable") }
+        client.onLeave = { endBecauseBroadcasterStopped() }
+        client.onExpire = { endBecauseBroadcasterStopped() }
         client.onError = { type -> fail(type) }
         client.onDisconnected = {
-            if (_mode.value != StreamMode.ERROR) {
+            if (!ending && _mode.value != StreamMode.ERROR) {
                 _error.value = AppError(
                     "Sinalização desconectada",
                     "A conexão inicial foi perdida. Tente novamente.",
@@ -291,8 +293,24 @@ class RtcViewerSession(
 
     private fun fail(type: String?) {
         if (receivedMediaSources.isNotEmpty()) return
-        _error.value = getPeerError(type)
+        terminate(getPeerError(type))
+    }
+
+    private fun endBecauseBroadcasterStopped() {
+        terminate(
+            AppError(
+                "Transmissão encerrada",
+                "O transmissor encerrou a live. Volte à tela inicial para entrar em outra transmissão.",
+            ),
+        )
+    }
+
+    private fun terminate(error: AppError) {
+        if (ending || _mode.value == StreamMode.IDLE || _mode.value == StreamMode.ERROR) return
+        ending = true
+        _error.value = error
         _mode.value = StreamMode.ERROR
+        disconnect()
     }
 
     private fun rtcConfig(): PeerConnection.RTCConfiguration =
@@ -301,6 +319,7 @@ class RtcViewerSession(
         }
 
     override fun disconnect() {
+        ending = true
         mediaLinks.values.forEach { it.close() }
         mediaLinks.clear()
         chatLink?.close()
