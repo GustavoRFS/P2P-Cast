@@ -88,14 +88,14 @@ class P2PCastMediaModule : Module() {
       publishPipModeAfterActivityTransition()
     }
 
-    AsyncFunction("requestCapturePermissions") { rawSettings: Map<String, Any?> ->
+    AsyncFunction("requestCapturePermissions") Coroutine { rawSettings: Map<String, Any?> ->
       val settings = CaptureSettings.fromBridge(rawSettings)
       requireNotNull(capturePermissionController) { "O controlador de permissões não está disponível." }
         .request(settings)
         .toBridgeMap()
     }
 
-    AsyncFunction("startBroadcast") { rawSettings: Map<String, Any?>, webOrigin: String ->
+    AsyncFunction("startBroadcast") Coroutine { rawSettings: Map<String, Any?>, webOrigin: String ->
       val settings = CaptureSettings.fromBridge(rawSettings)
       val permissions = requireNotNull(capturePermissionController) { "O controlador de permissões não está disponível." }
       require(permissions.hasRequiredRuntimePermissions(settings)) { "As permissões de câmera ou microfone foram revogadas." }

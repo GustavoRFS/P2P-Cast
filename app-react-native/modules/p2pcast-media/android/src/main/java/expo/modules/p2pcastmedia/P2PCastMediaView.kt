@@ -49,7 +49,7 @@ class P2PCastMediaView(context: Context, appContext: AppContext) : ExpoView(cont
   private var rendererInitialized = false
 
   init {
-    clipsToPadding = true
+    clipToPadding = true
     clipChildren = true
     addView(surface)
     surface.addView(renderer, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
