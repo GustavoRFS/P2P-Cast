@@ -3,6 +3,7 @@ package expo.modules.p2pcastmedia
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.activityresult.AppContextActivityResultLauncher
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.p2pcastmedia.capture.CapturePermissionController
 import expo.modules.p2pcastmedia.capture.CaptureSource
 import expo.modules.p2pcastmedia.capture.CaptureSettings
