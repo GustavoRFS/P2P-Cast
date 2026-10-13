@@ -14,6 +14,8 @@ O módulo Kotlin de captura e renderização não funciona no Expo Go. Instale o
 
 O áudio interno da tela aparece como indisponível nesta versão. O microfone é enviado como uma faixa separada junto com a câmera quando ativado. Para espectadores, o áudio começa desligado e pode ser ativado nos controles.
 
+O módulo Kotlin usa `ws://129.148.41.116:9000/peerjs/peerjs` para sinalização. A alteração exige um novo build Android; OTA updates não substituem esse código nativo.
+
 ## Builds EAS
 
 O projeto EAS é [`gustavorfsdev/app-react-native`](https://expo.dev/accounts/gustavorfsdev/projects/app-react-native). O arquivo `eas.json` define os canais `development`, `preview` e `production`:

@@ -8,10 +8,15 @@ import Peer from "peerjs";
 import { createPeer } from "./peer";
 
 describe("PeerJS transport", () => {
-    it("uses Google STUN with the PeerJS Cloud defaults", () => {
+    it("uses the self-hosted PeerJS server and Google STUN", () => {
         createPeer();
 
         expect(Peer).toHaveBeenCalledWith({
+            host: "129.148.41.116",
+            port: 9000,
+            path: "/peerjs",
+            key: "peerjs",
+            secure: false,
             config: {
                 iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
             },
@@ -23,6 +28,11 @@ describe("PeerJS transport", () => {
         createPeer("broadcast-123");
 
         expect(Peer).toHaveBeenCalledWith("broadcast-123", {
+            host: "129.148.41.116",
+            port: 9000,
+            path: "/peerjs",
+            key: "peerjs",
+            secure: false,
             config: {
                 iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
             },

@@ -51,8 +51,8 @@ fun getPeerError(type: String?): AppError = when (type) {
         message = "Não foi possível conversar com o serviço de sinalização do PeerJS.",
     )
     "ssl-unavailable" -> AppError(
-        title = "Conexão segura indisponível",
-        message = "O PeerJS Cloud exige uma conexão segura disponível.",
+        title = "Conexão de sinalização indisponível",
+        message = "Não foi possível estabelecer uma conexão com o servidor PeerJS.",
     )
     "browser-incompatible" -> AppError(
         title = "Aparelho incompatível",
