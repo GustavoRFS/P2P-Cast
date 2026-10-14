@@ -25,11 +25,6 @@ function withP2PCastMedia(config) {
     const application = manifest.application?.[0];
     if (!application) throw new Error('O AndroidManifest não tem uma aplicação configurada.');
 
-    application.$ = {
-      ...application.$,
-      'android:usesCleartextTraffic': 'true',
-    };
-
     application.service ??= [];
     let service = application.service.find((entry) => entry.$?.['android:name'] === SERVICE_NAME);
     if (!service) {

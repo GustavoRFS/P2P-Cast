@@ -59,7 +59,7 @@ export function BroadcastScreen() {
   };
 
   const flipCamera = () => {
-    const nextFacing = settings.cameraFacing === 'user' ? 'environment' : 'user';
+    const nextFacing: CaptureSettings['cameraFacing'] = settings.cameraFacing === 'user' ? 'environment' : 'user';
     const nextSettings = { ...settings, cameraFacing: nextFacing };
     setSettings(nextSettings);
     void saveCaptureSettings(nextSettings);

@@ -89,7 +89,7 @@ function trustedCsp() {
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "media-src 'self' blob:",
-        `connect-src 'self' http://129.148.41.116:9000 ws://129.148.41.116:9000 ${httpOrigin} ${socketOrigin}`,
+        `connect-src 'self' https://peerjs.ligmacharl.es wss://peerjs.ligmacharl.es ${httpOrigin} ${socketOrigin}`,
         "object-src 'none'",
         "base-uri 'self'",
         "frame-ancestors 'none'",

@@ -7,7 +7,7 @@ export default function P2PCastVideoView(props: P2PCastVideoViewProps) {
       {...props}
       style={[props.style, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#030a12' }]}
     >
-      <Text style={{ color: '#93a9c2', fontSize: 12 }}>Prévia WebRTC disponível no app Android</Text>
+      <Text style={{ color: '#93a9c2', fontSize: 12 }}>Vídeo ao vivo disponível no app Android</Text>
     </View>
   );
 }

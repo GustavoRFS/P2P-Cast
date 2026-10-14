@@ -14,7 +14,9 @@ O módulo Kotlin de captura e renderização não funciona no Expo Go. Instale o
 
 O áudio interno da tela aparece como indisponível nesta versão. O microfone é enviado como uma faixa separada junto com a câmera quando ativado. Para espectadores, o áudio começa desligado e pode ser ativado nos controles.
 
-O módulo Kotlin usa `ws://129.148.41.116:9000/peerjs/peerjs` para sinalização. A alteração exige um novo build Android; OTA updates não substituem esse código nativo.
+O módulo Kotlin usa `wss://peerjs.ligmacharl.es/peerjs/peerjs` para sinalização. A alteração exige um novo build Android; OTA updates não substituem esse código nativo.
+
+A beta web está em [p2p-cast-react-native-beta.vercel.app](https://p2p-cast-react-native-beta.vercel.app), separada do site legado. Ela exporta a interface React Native; captura, vídeo ao vivo e PiP continuam disponíveis somente no app Android.
 
 ## Builds EAS
 

@@ -8,7 +8,8 @@
     "scheme": "p2pcast-react-native",
     "userInterfaceStyle": "dark",
     "platforms": [
-      "android"
+      "android",
+      "web"
     ],
     "ios": {
       "icon": "./assets/expo.icon"

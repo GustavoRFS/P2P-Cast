@@ -52,7 +52,7 @@ npm ci
 npm run dev
 ```
 
-Para um build web: `npm run build`. Os clientes usam `129.148.41.116:9000/peerjs` para sinalização e WebRTC direto para vídeo/áudio. A configuração usa HTTP/WebSocket sem TLS; navegadores podem bloquear `ws://` quando a página é servida por HTTPS. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
+Para um build web: `npm run build`. Os clientes usam `https://peerjs.ligmacharl.es/peerjs` para sinalização segura e WebRTC direto para vídeo/áudio. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
 
 ## Desktop
 
@@ -108,4 +108,4 @@ O seletor nativo do Tauri pede que a pessoa escolha uma janela. A aplicação co
 
 ## Compatibilidade do protocolo
 
-O servidor PeerJS em `129.148.41.116:9000/peerjs` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android, React Native e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.
+O servidor PeerJS em `peerjs.ligmacharl.es/peerjs` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android, React Native e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.

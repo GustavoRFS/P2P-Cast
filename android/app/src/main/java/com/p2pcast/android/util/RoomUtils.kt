@@ -86,6 +86,6 @@ class WebOriginStore(context: Context) {
     }
 
     companion object {
-        const val DEFAULT_ORIGIN = "https://live.ligmacharl.es"
+        const val DEFAULT_ORIGIN = "https://p2p-cast-web.vercel.app"
     }
 }

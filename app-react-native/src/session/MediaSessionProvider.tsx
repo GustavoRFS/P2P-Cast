@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { P2PCastMedia, type NativeError, type NativeMediaEventMap, type NativeMediaEventName, type NativeSessionMode } from '../../modules/p2pcast-media';
+import { P2PCastMedia, type NativeError, type NativeMediaEventMap, type NativeMediaEventName, type NativeSessionMode, type P2PCastMediaModuleEvents } from '../../modules/p2pcast-media';
 import type { ChatMessage } from '@/domain/chat';
 
 export type SessionChatMessage = ChatMessage & { sessionId: string; isSelf: boolean };
@@ -56,7 +56,7 @@ export function MediaSessionProvider({ children }: { children: ReactNode }) {
 
     const listeners: { remove: () => void }[] = [];
     const subscribe = <EventName extends NativeMediaEventName,>(eventName: EventName, listener: (event: NativeMediaEventMap[EventName]) => void) => {
-      listeners.push(P2PCastMedia.addListener(eventName, listener));
+      listeners.push(P2PCastMedia.addListener(eventName, listener as P2PCastMediaModuleEvents[EventName]));
     };
 
     subscribe('stateChanged', (event) => {

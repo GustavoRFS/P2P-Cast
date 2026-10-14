@@ -1,6 +1,6 @@
 # p2pcast
 
-Uma ferramenta leve para compartilhar a tela com amigos durante uma partida ou conversa. A mídia usa WebRTC diretamente entre os navegadores; o servidor PeerJS em `129.148.41.116:9000/peerjs` é usado somente para a sinalização inicial.
+Uma ferramenta leve para compartilhar a tela com amigos durante uma partida ou conversa. A mídia usa WebRTC diretamente entre os navegadores; o servidor PeerJS em `https://peerjs.ligmacharl.es/peerjs` é usado somente para a sinalização inicial.
 
 ## Rodar localmente
 
@@ -12,6 +12,10 @@ npm run dev
 ```
 
 Abra o endereço mostrado pelo Vite. localhost é considerado um contexto seguro pelos navegadores para o compartilhamento de tela.
+
+## Deploy
+
+O site legado está publicado em [p2p-cast-web.vercel.app](https://p2p-cast-web.vercel.app). A beta exportada do Expo usa o projeto Vercel separado `p2p-cast-react-native-beta`.
 
 ## Build
 
@@ -27,7 +31,7 @@ npm run build
 3. Use npm run build como comando de build.
 4. Use dist como diretório de saída, se a Vercel pedir essa configuração.
 
-A URL da Vercel usa HTTPS, então getDisplayMedia poderá solicitar o compartilhamento de tela. O PeerJS está configurado sem TLS; o navegador pode bloquear o `ws://` misto nessa página HTTPS. Não é necessário criar uma Vercel Function, banco de dados ou servidor de vídeo.
+A URL da Vercel usa HTTPS, então getDisplayMedia poderá solicitar o compartilhamento de tela. O PeerJS também usa HTTPS/WSS. Não é necessário criar uma Vercel Function, banco de dados ou servidor de vídeo.
 
 ## Como funciona
 

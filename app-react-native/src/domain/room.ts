@@ -1,4 +1,4 @@
-export const DEFAULT_WEB_ORIGIN = 'https://live.ligmacharl.es';
+export const DEFAULT_WEB_ORIGIN = 'https://p2p-cast-react-native-beta.vercel.app';
 
 function decode(value: string): string | null {
   try {

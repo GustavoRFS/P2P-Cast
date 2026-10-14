@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
  * Hand-rolled client for the PeerJS signaling protocol — there is no
  * PeerJS SDK for Android, so this replicates the wire format peer.ts's
  * `new Peer(id, { config, debug })` configured for the self-hosted server
- * (host 129.148.41.116, port 9000, path /peerjs, cleartext, key "peerjs").
+ * (host peerjs.ligmacharl.es, port 443, path /peerjs, TLS, key "peerjs").
  *
  * Only the signaling channel lives here — SDP/ICE payload contents are
  * standard WebRTC JSEP objects (peerjs's Negotiator doesn't munge SDP in
@@ -76,7 +76,7 @@ class PeerSignalingClient(
         // Matches peerjs's Socket._baseUrl + "&id=...&token=..." exactly — no
         // "version" param (verified against the actual peerjs 1.5.5 source;
         // the real client never sends one).
-        val url = "ws://129.148.41.116:9000/peerjs/peerjs?key=peerjs&id=$localId&token=$token"
+        val url = "wss://peerjs.ligmacharl.es/peerjs/peerjs?key=peerjs&id=$localId&token=$token"
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(
