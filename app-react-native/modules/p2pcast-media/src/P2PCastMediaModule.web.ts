@@ -48,4 +48,5 @@ class P2PCastMediaModule extends NativeModule<P2PCastMediaModuleEvents> implemen
   }
 }
 
-export default registerWebModule(P2PCastMediaModule, 'P2PCastMediaModule');
+export const P2PCastMedia = registerWebModule(P2PCastMediaModule, 'P2PCastMediaModule');
+export default P2PCastMedia;
