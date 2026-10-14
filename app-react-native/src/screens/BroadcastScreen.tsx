@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +17,7 @@ export function BroadcastScreen() {
   const [settings, setSettings] = useState<CaptureSettings>(DEFAULT_CAPTURE_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [webStarted, setWebStarted] = useState(false);
   const started = useRef(false);
   const mounted = useRef(true);
 
@@ -44,6 +45,7 @@ export function BroadcastScreen() {
 
   useEffect(() => {
     if (!settingsReady || started.current) return;
+    if (Platform.OS === 'web') return;
     started.current = true;
     void startCapture(settings);
   }, [settingsReady, settings, startCapture]);
@@ -90,6 +92,17 @@ export function BroadcastScreen() {
           local
           mirrorCamera={settings.cameraFacing === 'user'}
         />
+
+        {Platform.OS === 'web' && settingsReady && !webStarted && session.mode === 'idle' ? (
+          <View style={styles.webStartCard}>
+            <Text style={styles.webStartText}>O navegador vai pedir permissão para compartilhar a tela ou usar a câmera.</Text>
+            <PrimaryButton title="Escolher fonte e transmitir" icon="↗" onPress={() => {
+              started.current = true;
+              setWebStarted(true);
+              void startCapture(settings);
+            }} />
+          </View>
+        ) : null}
 
         {errorMessage ? (
           <View style={styles.errorBox}>
@@ -203,4 +216,6 @@ const styles = StyleSheet.create({
   retryButton: { alignSelf: 'flex-start', paddingTop: 5 },
   retryText: { color: colors.cyan, fontSize: 9, fontWeight: '900' },
   loading: { color: colors.muted, fontSize: 9, textAlign: 'center' },
+  webStartCard: { gap: 10, padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: '#0e1d31' },
+  webStartText: { color: colors.muted, fontSize: 10, lineHeight: 15 },
 });

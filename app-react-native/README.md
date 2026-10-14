@@ -16,7 +16,7 @@ O áudio interno da tela aparece como indisponível nesta versão. O microfone �
 
 O módulo Kotlin usa `wss://peerjs.ligmacharl.es/peerjs/peerjs` para sinalização. A alteração exige um novo build Android; OTA updates não substituem esse código nativo.
 
-A beta web está em [p2p-cast-react-native-beta.vercel.app](https://p2p-cast-react-native-beta.vercel.app), separada do site legado. Ela exporta a interface React Native; captura, vídeo ao vivo e PiP continuam disponíveis somente no app Android.
+A beta web está em [p2p-cast-react-native-beta.vercel.app](https://p2p-cast-react-native-beta.vercel.app), separada do site legado. Ela exporta a interface React Native e usa a implementação web do módulo Expo para captura no navegador, PeerJS, reprodução de vídeo e Picture-in-Picture quando o navegador oferece suporte. Compartilhamento de tela requer HTTPS e um clique explícito; áudio da tela e PiP dependem do navegador e da fonte escolhida. O app Android continua usando a implementação nativa Kotlin.
 
 ## Builds EAS
 

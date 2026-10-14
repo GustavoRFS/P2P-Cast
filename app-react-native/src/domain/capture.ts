@@ -63,11 +63,12 @@ export function formatCaptureSettings(settings: CaptureSettings): string {
   const source = CAPTURE_SOURCE_OPTIONS.find((option) => option.value === settings.source)?.label.toLowerCase() ?? 'tela';
   const resolution = RESOLUTION_OPTIONS.find((option) => option.value === settings.resolution)?.label ?? '1080p';
   const bitrate = BITRATE_OPTIONS.find((option) => option.value === settings.bitrate)?.label ?? 'Automático';
+  const screenAudio = settings.screenAudio ? 'áudio da tela (se disponível)' : 'sem áudio da tela';
   const audio = settings.source === 'camera'
     ? settings.microphone ? 'com microfone' : 'sem microfone'
     : settings.source === 'both'
-      ? `áudio da tela indisponível · ${settings.microphone ? 'microfone' : 'sem microfone'}`
-      : 'áudio da tela indisponível';
+      ? `${screenAudio} · ${settings.microphone ? 'microfone' : 'sem microfone'}`
+      : screenAudio;
 
   return `${source} · ${resolution} · ${settings.fps} FPS · ${bitrate} · ${audio}`;
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   BITRATE_OPTIONS,
@@ -113,9 +113,9 @@ export function CaptureSettingsPanel({ settings, screenAudioAvailable, onChange 
               <View style={styles.capabilityDot} />
               <View style={styles.capabilityCopy}>
                 <Text style={styles.capabilityTitle}>Áudio da tela</Text>
-                <Text style={styles.capabilityDetail}>{screenAudioAvailable ? 'Disponível nesta captura' : 'Indisponível nesta versão do capturador Android'}</Text>
+                <Text style={styles.capabilityDetail}>{screenAudioAvailable ? 'Disponível nesta captura' : Platform.OS === 'web' ? 'Depende do navegador e da tela escolhida' : 'Indisponível nesta versão do capturador Android'}</Text>
               </View>
-              <Text style={styles.capabilityState}>{screenAudioAvailable ? 'DISPONÍVEL' : 'INDISPONÍVEL'}</Text>
+              <Text style={styles.capabilityState}>{screenAudioAvailable ? 'DISPONÍVEL' : Platform.OS === 'web' ? 'VARIÁVEL' : 'INDISPONÍVEL'}</Text>
             </View>
           ) : null}
 
