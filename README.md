@@ -4,6 +4,7 @@ O projeto mantém três clientes compatíveis com o mesmo protocolo PeerJS:
 
 - `web/`: React/Vite para transmitir e assistir pelo navegador.
 - `android/`: aplicativo Android atual.
+- `app-react-native/`: cliente Expo/React Native Android separado, com módulo Kotlin para captura de tela/câmera, vídeo WebRTC, PiP e EAS Update. Consulte [o README do app](app-react-native/README.md) para desenvolvimento, builds e publicação OTA.
 - `desktop/`: cliente Electron que reaproveita a interface React. Ele mantém os mesmos links PeerJS, adiciona login Discord opcional e mostra usuários autorizados ao vivo.
 - `backend/`: serviço Bun/Elysia para OAuth Discord, whitelist JSON e presença em tempo real. Ele não recebe vídeo nem áudio.
 
@@ -51,7 +52,7 @@ npm ci
 npm run dev
 ```
 
-Para um build web: `npm run build`. O app web continua usando PeerJS Cloud para sinalização e WebRTC direto para vídeo/áudio. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
+Para um build web: `npm run build`. Os clientes usam `https://peerjs.ligmacharl.es/peerjs` para sinalização segura e WebRTC direto para vídeo/áudio. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
 
 ## Desktop
 
@@ -107,4 +108,4 @@ O seletor nativo do Tauri pede que a pessoa escolha uma janela. A aplicação co
 
 ## Compatibilidade do protocolo
 
-PeerJS Cloud continua fazendo a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.
+O servidor PeerJS em `peerjs.ligmacharl.es/peerjs` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android, React Native e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.

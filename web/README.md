@@ -1,6 +1,6 @@
 # p2pcast
 
-Uma ferramenta leve para compartilhar a tela com amigos durante uma partida ou conversa. A mídia usa WebRTC diretamente entre os navegadores; o PeerJS Cloud é usado somente para a sinalização inicial.
+Uma ferramenta leve para compartilhar a tela com amigos durante uma partida ou conversa. A mídia usa WebRTC diretamente entre os navegadores; o servidor PeerJS em `https://peerjs.ligmacharl.es/peerjs` é usado somente para a sinalização inicial.
 
 ## Rodar localmente
 
@@ -12,6 +12,10 @@ npm run dev
 ```
 
 Abra o endereço mostrado pelo Vite. localhost é considerado um contexto seguro pelos navegadores para o compartilhamento de tela.
+
+## Deploy
+
+O site legado está publicado em [p2p-cast-web.vercel.app](https://p2p-cast-web.vercel.app). A beta exportada do Expo usa o projeto Vercel separado `p2p-cast-react-native-beta`.
 
 ## Build
 
@@ -27,18 +31,18 @@ npm run build
 3. Use npm run build como comando de build.
 4. Use dist como diretório de saída, se a Vercel pedir essa configuração.
 
-A URL da Vercel usa HTTPS, então getDisplayMedia poderá solicitar o compartilhamento de tela. Não é necessário criar uma Vercel Function, banco de dados ou servidor de vídeo.
+A URL da Vercel usa HTTPS, então getDisplayMedia poderá solicitar o compartilhamento de tela. O PeerJS também usa HTTPS/WSS. Não é necessário criar uma Vercel Function, banco de dados ou servidor de vídeo.
 
 ## Como funciona
 
 - O transmissor escolhe entre compartilhar a **tela**, a **câmera** ou os dois simultaneamente.
 - Resolução, FPS e bitrate podem ser configurados para qualquer fonte; o áudio da tela e o microfone podem ser ativados ou desativados separadamente.
 - Durante a transmissão, o transmissor pode mutar o áudio, e o espectador pode ativá-lo ou silenciá-lo localmente.
-- O app cria um ID temporário no PeerJS Cloud e gera um link.
+- O app cria um ID temporário no servidor PeerJS e gera um link.
 - O espectador abre o link e cria uma conexão WebRTC com o transmissor.
 - A imagem e o áudio seguem diretamente entre os navegadores quando a rede permite.
 
-O PeerJS Cloud ainda participa da sinalização. O Google STUN ajuda a descobrir uma rota direta, mas algumas redes restritivas exigiriam TURN e não são suportadas por esta primeira versão.
+O servidor PeerJS participa somente da sinalização. O Google STUN ajuda a descobrir uma rota direta, mas algumas redes restritivas exigiriam TURN e não são suportadas por esta primeira versão.
 
 ## Limitações intencionais
 
