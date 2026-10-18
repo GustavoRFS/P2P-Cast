@@ -88,7 +88,7 @@
 **Files:**
 - Modify: `desktop-tauri/src-tauri/Cargo.toml`
 - Modify: `desktop-tauri/src-tauri/Cargo.lock`
-- Modify: `desktop-tauri/package.json`
+- Modify: `web/package.json`
 - Modify: `desktop-tauri/src-tauri/capabilities/default.json`
 - Modify: `desktop-tauri/src-tauri/src/lib.rs`
 - Create: `desktop-tauri/src-tauri/src/windows_targets.rs`
