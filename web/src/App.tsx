@@ -35,7 +35,9 @@ import {
     type ChatMessage,
 } from "./lib/chat";
 import { createChatNotificationPlayer, type ChatNotificationPlayer } from "./lib/chat-sound";
-import { captureDesktopWindow, getDesktopConfig, isDesktopApp, listDesktopWindows, releaseDesktopCapture, type DesktopConfig, type DesktopWindow } from "./lib/desktop";
+import { captureDesktopWindow, getDesktopConfig, isDesktopApp, listDesktopCaptureTargets, listDesktopWindows, releaseDesktopCapture, resolveDesktopCaptureTarget, type DesktopConfig, type DesktopWindow } from "./lib/desktop";
+import { ShortcutProfiles } from "./components/ShortcutProfiles";
+import { loadShortcutProfiles, type ShortcutProfile } from "./lib/shortcut-profiles";
 import { useDesktopAccount, type DesktopAccount } from "./lib/desktop-account";
 import { createPeer, sendPeerLeave } from "./lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "./lib/receiver";
@@ -185,6 +187,10 @@ function HomeView({
     desktopAudioAvailable,
     desktopCapturePicker,
     desktopAccount,
+    captureTargets,
+    desktopHost,
+    directCaptureAvailable,
+    onShortcutProfilesChange,
 }: {
     settings: CaptureSettings;
     onSettingsChange: Dispatch<SetStateAction<CaptureSettings>>;
@@ -199,6 +205,10 @@ function HomeView({
     desktopAudioAvailable: boolean;
     desktopCapturePicker: "window-list" | "system-window";
     desktopAccount: DesktopAccount | null;
+    captureTargets: DesktopCaptureTarget[];
+    desktopHost: "electron" | "tauri";
+    directCaptureAvailable: boolean;
+    onShortcutProfilesChange: (profiles: ShortcutProfile[]) => void;
 }) {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const settingsSummary = formatCaptureSettings(settings);
@@ -269,6 +279,16 @@ function HomeView({
                             </>
                         )}
                     </section>
+                )}
+                {desktopMode && (
+                    <ShortcutProfiles
+                        targets={captureTargets}
+                        host={desktopHost}
+                        directCaptureAvailable={directCaptureAvailable}
+                        settings={settings}
+                        onRefresh={onRefreshDesktopSources}
+                        onChange={onShortcutProfilesChange}
+                    />
                 )}
                 {desktopMode && desktopAccount && (
                     <DesktopAccountPanel account={desktopAccount} />
@@ -535,6 +555,54 @@ function DesktopAccountPanel({ account }: { account: DesktopAccount }) {
     );
 }
 
+function LiveNotificationToasts({ account }: { account: DesktopAccount | null }) {
+    const notifications = account?.liveNotifications ?? [];
+    const dismiss = account?.dismissLiveNotification;
+    const watch = account?.watch;
+
+    useEffect(() => {
+        if (!dismiss || notifications.length === 0) return;
+        const timers = notifications.map(user => window.setTimeout(
+            () => dismiss(user.id, user.peerId),
+            10_000,
+        ));
+        return () => timers.forEach(window.clearTimeout);
+    }, [dismiss, notifications]);
+
+    if (!account || notifications.length === 0 || !dismiss || !watch) return null;
+
+    return (
+        <div className="desktop-live-notifications" aria-live="polite" aria-relevant="additions">
+            {notifications.map(user => (
+                <section className="desktop-live-notification" key={`${user.id}:${user.peerId}`} role="status">
+                    <div className="desktop-live-notification-copy">
+                        <strong>{user.username} está ao vivo</strong>
+                        <span>{user.activity || "Começou uma transmissão"}</span>
+                    </div>
+                    <button
+                        type="button"
+                        className="desktop-live-notification-watch"
+                        onClick={() => {
+                            dismiss(user.id, user.peerId);
+                            watch(user.peerId);
+                        }}
+                    >
+                        Assistir
+                    </button>
+                    <button
+                        type="button"
+                        className="desktop-live-notification-dismiss"
+                        aria-label={`Dispensar aviso de ${user.username}`}
+                        onClick={() => dismiss(user.id, user.peerId)}
+                    >
+                        ×
+                    </button>
+                </section>
+            ))}
+        </div>
+    );
+}
+
 function VideoActions({
     videoRef,
     stageRef,
@@ -775,6 +843,8 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     const [captureSettings, setCaptureSettings] = useState<CaptureSettings>(loadCaptureSettings);
     const [desktopConfig, setDesktopConfig] = useState<DesktopConfig | null>(null);
     const [desktopSources, setDesktopSources] = useState<DesktopWindow[]>([]);
+    const [captureTargets, setCaptureTargets] = useState<DesktopCaptureTarget[]>([]);
+    const [shortcutProfiles, setShortcutProfiles] = useState<ShortcutProfile[]>(loadShortcutProfiles);
     const [selectedDesktopSourceId, setSelectedDesktopSourceId] = useState("");
     const [desktopSourcesLoading, setDesktopSourcesLoading] = useState(desktopMode);
     const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -789,6 +859,8 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     const localCameraVideoRef = useRef<HTMLVideoElement>(null);
     const localStageRef = useRef<HTMLDivElement>(null);
     const localStreamsRef = useRef<CaptureStreams>(EMPTY_CAPTURE_STREAMS);
+    const modeRef = useRef(mode);
+    modeRef.current = mode;
     const peerRef = useRef<Peer | null>(null);
     const callsRef = useRef<MediaConnection[]>([]);
     const chatConnectionsRef = useRef<DataConnection[]>([]);
@@ -801,8 +873,9 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
         if (!desktopMode) return;
         setDesktopSourcesLoading(true);
         try {
-            const sources = await listDesktopWindows();
+            const [sources, targets] = await Promise.all([listDesktopWindows(), listDesktopCaptureTargets()]);
             setDesktopSources(sources);
+            setCaptureTargets(targets);
             setSelectedDesktopSourceId(current => sources.some(source => source.id === current) ? current : sources[0]?.id ?? "");
         } catch {
             setDesktopSources([]);
@@ -908,6 +981,8 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     const startBroadcast = useCallback(async (
         settings: CaptureSettings = captureSettings,
         sourceId: string | undefined = selectedDesktopSourceId || undefined,
+        profile?: ShortcutProfile,
+        audioSourceId?: string,
     ) => {
         setMode("starting");
         setError(null);
@@ -934,7 +1009,11 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
                 if (desktopMode) {
                     if (!sourceId) throw new TypeError("Selecione uma janela ou aplicativo para transmitir.");
                     if (!desktopConfig) throw new Error("A configuração desktop ainda não está disponível.");
-                    nextStreams.screen = await captureDesktopWindow(sourceId, settings, desktopConfig);
+                    nextStreams.screen = await captureDesktopWindow(sourceId, settings, desktopConfig, {
+                        captureMethod: profile?.captureMethod,
+                        targetKind: profile?.videoTarget.kind,
+                        audioSourceId,
+                    });
                 } else {
                     nextStreams.screen = await navigator.mediaDevices.getDisplayMedia(buildDisplayMediaOptions(settings));
                 }
@@ -1064,6 +1143,49 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     }, [captureSettings, desktopConfig, desktopMode, selectedDesktopSourceId, setLivePeer, stopBroadcast, updateViewerCount]);
 
     useEffect(() => {
+        if (!desktopMode || !window.p2pcastDesktop?.registerShortcutProfiles) return;
+        let active = true;
+        const registration = shortcutProfiles.map(({ id, shortcut }) => ({ id, shortcut }));
+        void window.p2pcastDesktop.registerShortcutProfiles(registration).then(results => {
+            if (!active) return;
+            const failed = results.filter(result => !result.ok);
+            if (failed.length) {
+                setError({
+                    title: "Alguns atalhos não foram registrados",
+                    message: `${failed.length} atalho(s) estão duplicados ou indisponíveis no Windows. Edite o perfil e escolha outra combinação.`,
+                });
+            }
+        }).catch(() => {
+            if (active && shortcutProfiles.length) setError({ title: "Não foi possível registrar os atalhos", message: "Reabra as configurações dos atalhos e tente novamente." });
+        });
+        const removeListener = window.p2pcastDesktop.onShortcutProfile?.(profileId => {
+            const profile = shortcutProfiles.find(item => item.id === profileId);
+            if (!profile) return;
+            if (modeRef.current !== "idle" && modeRef.current !== "error") {
+                setError({ title: "Já existe uma transmissão ativa", message: "Encerre a transmissão atual antes de iniciar outro perfil." });
+                return;
+            }
+            void (async () => {
+                const video = await resolveDesktopCaptureTarget(profile.videoTarget.selector);
+                const audio = await resolveDesktopCaptureTarget(profile.audioSourceSelector);
+                if (!video || !audio || audio.kind !== "window") {
+                    setError({ title: "Programa indisponível", message: "Abra novamente o programa de vídeo e áudio selecionado e atualize os alvos." });
+                    return;
+                }
+                await startBroadcast(profile.settings, video.id, profile, audio.id);
+            })().catch(captureError => {
+                setError(getMediaError(captureError, "screen"));
+                setMode("error");
+            });
+        });
+        return () => {
+            active = false;
+            removeListener?.();
+            void window.p2pcastDesktop?.registerShortcutProfiles?.([]);
+        };
+    }, [desktopMode, shortcutProfiles, startBroadcast]);
+
+    useEffect(() => {
         const onDesktopAudioError = (event: Event) => {
             const message = event instanceof CustomEvent && typeof event.detail === "string"
                 ? event.detail
@@ -1077,6 +1199,22 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
         };
         window.addEventListener("p2pcast:application-audio-error", onDesktopAudioError);
         return () => window.removeEventListener("p2pcast:application-audio-error", onDesktopAudioError);
+    }, [stopBroadcast]);
+
+    useEffect(() => {
+        const onDesktopVideoError = (event: Event) => {
+            const message = event instanceof CustomEvent && typeof event.detail === "string"
+                ? event.detail
+                : "A captura direta de vídeo foi interrompida.";
+            stopBroadcast();
+            setError({
+                title: "Captura de vídeo interrompida",
+                message: `${message} A transmissão foi encerrada.`,
+            });
+            setMode("error");
+        };
+        window.addEventListener("p2pcast:direct-video-error", onDesktopVideoError);
+        return () => window.removeEventListener("p2pcast:direct-video-error", onDesktopVideoError);
     }, [stopBroadcast]);
 
     useEffect(() => {
@@ -1175,6 +1313,10 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
                     desktopAudioAvailable={desktopConfig?.isolatedAudioAvailable ?? false}
                     desktopCapturePicker={desktopConfig?.capturePicker ?? "window-list"}
                     desktopAccount={desktopMode ? desktopAccount : null}
+                    captureTargets={captureTargets}
+                    desktopHost={desktopConfig?.host ?? "electron"}
+                    directCaptureAvailable={desktopConfig?.directVideoCaptureAvailable ?? false}
+                    onShortcutProfilesChange={setShortcutProfiles}
                 />
                 {error && (
                     <div className="floating-error">
@@ -1721,13 +1863,15 @@ function AndroidAppBanner() {
 export default function App() {
     const broadcastId = parseWatchId(window.location.search);
     const desktopAccount = useDesktopAccount();
+    const account = isDesktopApp() ? desktopAccount : null;
 
     return (
         <>
+            <LiveNotificationToasts account={account} />
             <AndroidAppBanner />
             {broadcastId
                 ? <ViewerView broadcastId={broadcastId} />
-                : <BroadcastView desktopAccount={isDesktopApp() ? desktopAccount : null} />}
+                : <BroadcastView desktopAccount={account} />}
         </>
     );
 }

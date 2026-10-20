@@ -11,6 +11,15 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+mod windows_audio;
+#[cfg(windows)]
+mod windows_capture;
+#[cfg(not(windows))]
+#[path = "windows_capture_stub.rs"]
+mod windows_capture;
+#[cfg(windows)]
+mod windows_targets;
+
 const KEYRING_SERVICE: &str = "com.p2pcast.desktop.tauri";
 const SESSION_KEY: &str = "discord-session";
 const LOGIN_VERIFIER_KEY: &str = "discord-login-verifier";
@@ -36,7 +45,19 @@ struct DesktopConfig {
     backend_url: String,
     web_url: String,
     isolated_audio_available: bool,
+    direct_video_capture_available: bool,
     capture_picker: &'static str,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopCaptureTarget {
+    id: String,
+    selector: String,
+    kind: String,
+    name: String,
+    process_id: Option<u32>,
+    thumbnail_data_url: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -117,7 +138,8 @@ fn get_desktop_config(app: &AppHandle) -> Result<DesktopConfig, String> {
     Ok(DesktopConfig {
         backend_url: normalized_origin(&backend_raw, "backendUrl")?,
         web_url: normalized_origin(&web_raw, "webUrl")?,
-        isolated_audio_available: false,
+        isolated_audio_available: windows_audio::AudioCaptures::is_available(app),
+        direct_video_capture_available: windows_capture::VideoCaptures::is_available(app),
         capture_picker: "system-window",
     })
 }
@@ -125,6 +147,95 @@ fn get_desktop_config(app: &AppHandle) -> Result<DesktopConfig, String> {
 #[tauri::command]
 fn desktop_config(app: AppHandle) -> Result<DesktopConfig, String> {
     get_desktop_config(&app)
+}
+
+#[tauri::command]
+fn list_capture_targets() -> Result<Vec<DesktopCaptureTarget>, String> {
+    #[cfg(windows)]
+    {
+        windows_targets::list()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command]
+fn resolve_capture_target(selector: String) -> Result<Option<DesktopCaptureTarget>, String> {
+    if selector.is_empty() || selector.len() > 2048 {
+        return Err("Invalid capture target selector".to_string());
+    }
+    #[cfg(windows)]
+    {
+        windows_targets::resolve(&selector)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = selector;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn start_application_audio(
+    app: AppHandle,
+    captures: tauri::State<'_, windows_audio::AudioCaptures>,
+    source_id: String,
+) -> Result<windows_audio::AudioStarted, String> {
+    windows_audio::start(app, &captures, source_id)
+}
+
+#[tauri::command]
+fn resume_application_audio(
+    app: AppHandle,
+    captures: tauri::State<'_, windows_audio::AudioCaptures>,
+    capture_id: String,
+) -> Result<(), String> {
+    windows_audio::resume(&captures, &capture_id, &app)
+}
+
+#[tauri::command]
+fn stop_application_audio(
+    captures: tauri::State<'_, windows_audio::AudioCaptures>,
+    capture_id: String,
+) -> Result<(), String> {
+    windows_audio::stop(&captures, &capture_id)
+}
+
+#[tauri::command]
+fn start_direct_video_capture(
+    app: AppHandle,
+    captures: tauri::State<'_, windows_capture::VideoCaptures>,
+    source_id: String,
+    settings: windows_capture::VideoCaptureSettings,
+) -> Result<windows_capture::VideoCaptureDescriptor, String> {
+    windows_capture::start(app, &captures, source_id, settings)
+}
+
+#[tauri::command]
+fn resume_direct_video_capture(
+    app: AppHandle,
+    captures: tauri::State<'_, windows_capture::VideoCaptures>,
+    capture_id: String,
+) -> Result<(), String> {
+    windows_capture::resume(app, &captures, &capture_id)
+}
+
+#[tauri::command]
+fn acknowledge_direct_video_frame(
+    captures: tauri::State<'_, windows_capture::VideoCaptures>,
+    capture_id: String,
+) -> Result<(), String> {
+    windows_capture::acknowledge(&captures, &capture_id)
+}
+
+#[tauri::command]
+fn stop_direct_video_capture(
+    captures: tauri::State<'_, windows_capture::VideoCaptures>,
+    capture_id: String,
+) -> Result<(), String> {
+    windows_capture::stop(&captures, &capture_id)
 }
 
 fn valid_secret(value: &str) -> bool {
@@ -293,9 +404,21 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .manage(windows_audio::AudioCaptures::default())
+        .manage(windows_capture::VideoCaptures::default())
         .invoke_handler(tauri::generate_handler![
             desktop_config,
+            list_capture_targets,
+            resolve_capture_target,
+            start_application_audio,
+            resume_application_audio,
+            stop_application_audio,
+            start_direct_video_capture,
+            resume_direct_video_capture,
+            acknowledge_direct_video_frame,
+            stop_direct_video_capture,
             get_saved_session,
             save_session,
             clear_session,

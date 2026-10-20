@@ -1,13 +1,15 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 
-const SYSTEM_WINDOW_SOURCE_ID = "tauri:system-window-picker";
 const OAUTH_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 type TauriDesktopConfig = {
     backendUrl: string;
     webUrl: string;
-    isolatedAudioAvailable: false;
+    isolatedAudioAvailable: boolean;
+    directVideoCaptureAvailable: boolean;
     capturePicker: "system-window";
 };
 
@@ -34,6 +36,10 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
     window.setInterval(cleanExpiredLoginVerifier, 60_000);
 
     const authCallbacks = new Set<(code: string) => void>();
+    const shortcutCallbacks = new Set<(profileId: string) => void>();
+    const audioListenersReady = new Map<string, Promise<void>[]>();
+    const directVideoFrameListeners = new Map<string, Set<(frame: { buffer: ArrayBuffer; width: number; height: number }) => void>>();
+    const directVideoErrorListeners = new Map<string, Set<(message: string) => void>>();
     const receivedAuthCodes = new Set<string>();
     let pendingAuthCode: string | null = null;
     const deliverAuthCode = (rawUrl: string) => {
@@ -51,14 +57,82 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
         for (const callback of [...authCallbacks]) callback(code);
     };
 
+    const webview2 = (window as Window & {
+        chrome?: {
+            webview?: {
+                addEventListener: (name: string, callback: (event: Event & {
+                    additionalData?: unknown;
+                    getBuffer(): ArrayBuffer;
+                }) => void) => void;
+                releaseBuffer: (buffer: ArrayBuffer) => void;
+            };
+        };
+    }).chrome?.webview;
+    webview2?.addEventListener("sharedbufferreceived", event => {
+        const metadata = event.additionalData as { type?: unknown; captureId?: unknown; width?: unknown; height?: unknown } | undefined;
+        if (metadata?.type !== "p2pcast-frame" || typeof metadata.captureId !== "string") return;
+        const frameBuffer = event.getBuffer();
+        try {
+            if (typeof metadata.width === "number" && typeof metadata.height === "number") {
+                for (const callback of [...(directVideoFrameListeners.get(metadata.captureId) ?? [])]) {
+                    callback({ buffer: frameBuffer, width: metadata.width, height: metadata.height });
+                }
+            }
+        } catch (error) {
+            window.dispatchEvent(new CustomEvent("p2pcast:direct-video-error", {
+                detail: error instanceof Error ? error.message : "Could not render a captured video frame.",
+            }));
+        } finally {
+            webview2.releaseBuffer(frameBuffer);
+            void invoke("acknowledge_direct_video_frame", { captureId: metadata.captureId }).catch(error => {
+                console.error("Could not acknowledge a Tauri WGC frame:", error);
+            });
+        }
+    });
+    const directVideoErrorReady = listen<{ captureId: string; message: string }>("desktop-video-error", event => {
+        for (const callback of [...(directVideoErrorListeners.get(event.payload.captureId) ?? [])]) {
+            callback(event.payload.message);
+        }
+    }).then(() => undefined).catch(error => {
+        console.error("Could not subscribe to Tauri WGC errors:", error);
+    });
+
     window.p2pcastDesktop = Object.freeze({
-        getWindowSources: async () => [{
-            id: SYSTEM_WINDOW_SOURCE_ID,
-            name: "Escolher janela ao iniciar a transmissão",
-            thumbnailDataUrl: "",
-        }],
+        getWindowSources: async () => (await invoke<DesktopCaptureTarget[]>("list_capture_targets"))
+            .filter(target => target.kind === "window")
+            .map(target => ({ id: target.id, name: target.name, thumbnailDataUrl: target.thumbnailDataUrl ?? "" })),
+        listCaptureTargets: () => invoke<DesktopCaptureTarget[]>("list_capture_targets"),
+        resolveCaptureTarget: (selector: string) => invoke<DesktopCaptureTarget | null>("resolve_capture_target", { selector }),
+        registerShortcutProfiles: async profiles => {
+            await unregisterAll();
+            const results: DesktopShortcutRegistrationResult[] = [];
+            const seen = new Set<string>();
+            for (const profile of profiles) {
+                const canonical = profile.shortcut.toLowerCase().split("+").map(part => part.trim()).sort().join("+");
+                if (seen.has(canonical)) {
+                    results.push({ id: profile.id, ok: false, error: "duplicate" });
+                    continue;
+                }
+                seen.add(canonical);
+                const shortcut = profile.shortcut.replace(/^Ctrl\+/i, "CommandOrControl+");
+                try {
+                    await register(shortcut, event => {
+                        if (event.state !== "Pressed") return;
+                        for (const callback of [...shortcutCallbacks]) callback(profile.id);
+                    });
+                    results.push({ id: profile.id, ok: true });
+                } catch {
+                    results.push({ id: profile.id, ok: false, error: "unavailable" });
+                }
+            }
+            return results;
+        },
+        onShortcutProfile: (callback: (profileId: string) => void) => {
+            shortcutCallbacks.add(callback);
+            return () => shortcutCallbacks.delete(callback);
+        },
         selectWindow: async (sourceId: string) => {
-            if (sourceId !== SYSTEM_WINDOW_SOURCE_ID) throw new TypeError("Invalid system window picker id");
+            if (typeof sourceId !== "string" || sourceId.length === 0 || sourceId.length > 256) throw new TypeError("Invalid capture target id");
         },
         getConfig: async () => {
             const config = await invoke<TauriDesktopConfig>("desktop_config");
@@ -89,13 +163,76 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
             }
             return () => authCallbacks.delete(callback);
         },
-        startApplicationAudio: async () => {
-            throw new Error("Áudio isolado do aplicativo não está disponível no host Tauri.");
+        startApplicationAudio: (sourceId: string) => invoke<{
+            captureId: string;
+            format: DesktopApplicationAudioFormat;
+        }>("start_application_audio", { sourceId }),
+        resumeApplicationAudio: async (captureId: string) => {
+            await Promise.all(audioListenersReady.get(captureId) ?? []);
+            await invoke<void>("resume_application_audio", { captureId });
+            audioListenersReady.delete(captureId);
         },
-        resumeApplicationAudio: async () => undefined,
-        stopApplicationAudio: async () => undefined,
-        onApplicationAudioData: () => () => undefined,
-        onApplicationAudioError: () => () => undefined,
+        stopApplicationAudio: async (captureId: string) => {
+            audioListenersReady.delete(captureId);
+            await invoke<void>("stop_application_audio", { captureId });
+        },
+        onApplicationAudioData: (captureId: string, callback: (chunk: ArrayBuffer) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            const ready = listen<{ captureId: string; chunk: number[] }>("desktop-audio-data", event => {
+                if (!active || event.payload.captureId !== captureId || !Array.isArray(event.payload.chunk)) return;
+                callback(Uint8Array.from(event.payload.chunk).buffer);
+            }).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            audioListenersReady.set(captureId, [...(audioListenersReady.get(captureId) ?? []), ready.then(() => undefined)]);
+            return () => {
+                active = false;
+                unlisten?.();
+            };
+        },
+        onApplicationAudioError: (captureId: string, callback: (message: string) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            const ready = listen<{ captureId: string; message: string }>("desktop-audio-error", event => {
+                if (active && event.payload.captureId === captureId) callback(event.payload.message);
+            }).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            audioListenersReady.set(captureId, [...(audioListenersReady.get(captureId) ?? []), ready.then(() => undefined)]);
+            return () => {
+                active = false;
+                unlisten?.();
+            };
+        },
+        startDirectVideoCapture: (sourceId: string, settings: { fps: number; cursor: "always" | "motion" | "never" }) =>
+            invoke<{ captureId: string; width: number; height: number; format: "rgba8" }>("start_direct_video_capture", { sourceId, settings }),
+        resumeDirectVideoCapture: async (captureId: string) => {
+            await directVideoErrorReady;
+            await invoke<void>("resume_direct_video_capture", { captureId });
+        },
+        acknowledgeDirectVideoFrame: (captureId: string) => invoke<void>("acknowledge_direct_video_frame", { captureId }),
+        stopDirectVideoCapture: (captureId: string) => invoke<void>("stop_direct_video_capture", { captureId }),
+        onDirectVideoFrame: (captureId: string, callback: (frame: { buffer: ArrayBuffer; width: number; height: number }) => void) => {
+            const callbacks = directVideoFrameListeners.get(captureId) ?? new Set();
+            callbacks.add(callback);
+            directVideoFrameListeners.set(captureId, callbacks);
+            return () => {
+                callbacks.delete(callback);
+                if (callbacks.size === 0) directVideoFrameListeners.delete(captureId);
+            };
+        },
+        onDirectVideoError: (captureId: string, callback: (message: string) => void) => {
+            const callbacks = directVideoErrorListeners.get(captureId) ?? new Set();
+            callbacks.add(callback);
+            directVideoErrorListeners.set(captureId, callbacks);
+            return () => {
+                callbacks.delete(callback);
+                if (callbacks.size === 0) directVideoErrorListeners.delete(captureId);
+            };
+        },
     });
 
     try {

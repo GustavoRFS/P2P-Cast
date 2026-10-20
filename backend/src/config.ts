@@ -1,17 +1,13 @@
-import { fileURLToPath } from "node:url";
-
 export type BackendConfig = {
     port: number;
     publicUrl: string;
     discordClientId: string;
     discordClientSecret: string;
     discordRedirectUri: string;
+    discordGuildId: string;
     jwtSecret: string;
-    whitelistPath: string;
     appOrigins: Set<string>;
 };
-
-const defaultWhitelistPath = fileURLToPath(new URL("../whitelist.json", import.meta.url));
 
 function required(name: string): string {
     const value = process.env[name]?.trim();
@@ -35,6 +31,8 @@ export function getConfig(): BackendConfig {
     const discordClientSecret = development ? process.env.DISCORD_CLIENT_SECRET?.trim() || "development-client-secret" : required("DISCORD_CLIENT_SECRET");
     const discordRedirectUri = process.env.DISCORD_REDIRECT_URI?.trim()
         || `${publicUrl.replace(/\/$/, "")}/auth/discord/callback`;
+    const discordGuildId = required("DISCORD_GUILD_ID");
+    if (!/^\d{17,20}$/.test(discordGuildId)) throw new Error("DISCORD_GUILD_ID must be a valid Discord server ID");
     const jwtSecret = development ? process.env.JWT_SECRET?.trim() || "local-development-secret-change-this-32-chars" : required("JWT_SECRET");
     if (jwtSecret.length < 32) throw new Error("JWT_SECRET must contain at least 32 characters");
 
@@ -49,8 +47,8 @@ export function getConfig(): BackendConfig {
         discordClientId,
         discordClientSecret,
         discordRedirectUri,
+        discordGuildId,
         jwtSecret,
-        whitelistPath: process.env.WHITELIST_PATH?.trim() || defaultWhitelistPath,
         appOrigins: new Set(originValues),
     };
 }

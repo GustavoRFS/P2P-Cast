@@ -25,11 +25,13 @@ type PresenceFrame = {
 export type DesktopAccount = {
     user: DiscordProfile | null;
     liveUsers: DesktopLiveUser[];
+    liveNotifications: DesktopLiveUser[];
     error: string | null;
     loading: boolean;
     signIn(): Promise<void>;
     signOut(): Promise<void>;
     setLivePeer(peerId: string | null): void;
+    dismissLiveNotification(userId: string, peerId: string): void;
     watch(peerId: string): void;
 };
 
@@ -83,6 +85,7 @@ export function useDesktopAccount(): DesktopAccount {
     const [config, setConfig] = useState<DesktopConfig | null>(null);
     const [session, setSession] = useState<SavedSession | null>(null);
     const [liveUsers, setLiveUsers] = useState<DesktopLiveUser[]>([]);
+    const [liveNotifications, setLiveNotifications] = useState<DesktopLiveUser[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(desktopMode);
     const pendingVerifierRef = useRef<string | null>(null);
@@ -185,11 +188,13 @@ export function useDesktopAccount(): DesktopAccount {
             socketRef.current?.close();
             socketRef.current = null;
             setLiveUsers([]);
+            setLiveNotifications([]);
             return;
         }
 
         let active = true;
         let attempt = 0;
+        let previousLiveUserIds: Set<string> | null = null;
         let retryTimer: ReturnType<typeof setTimeout> | null = null;
         let socket: WebSocket | null = null;
 
@@ -215,7 +220,28 @@ export function useDesktopAccount(): DesktopAccount {
                         }
                         return;
                     }
-                    if (frame.type === "presence") setLiveUsers(decodeLiveUsers(frame.users));
+                    if (frame.type === "presence") {
+                        const users = decodeLiveUsers(frame.users);
+                        if (previousLiveUserIds) {
+                            const newlyLive = users.filter(user =>
+                                !previousLiveUserIds!.has(user.id) && user.id !== session.user.id,
+                            );
+                            for (const user of newlyLive) {
+                                setLiveNotifications(current => [
+                                    ...current.filter(item => item.id !== user.id),
+                                    user,
+                                ].slice(-3));
+                                if (config.host === "electron") {
+                                    void Promise.resolve(desktop.notifyLiveStarted?.({
+                                        username: user.username,
+                                        peerId: user.peerId,
+                                    })).catch(() => undefined);
+                                }
+                            }
+                        }
+                        previousLiveUserIds = new Set(users.map(user => user.id));
+                        setLiveUsers(users);
+                    }
                 } catch {
                     setError("O backend retornou uma atualização de presença inválida.");
                 }
@@ -293,14 +319,25 @@ export function useDesktopAccount(): DesktopAccount {
         window.location.assign(url.toString());
     }, []);
 
+    const dismissLiveNotification = useCallback((userId: string, peerId: string) => {
+        setLiveNotifications(current => current.filter(user => user.id !== userId || user.peerId !== peerId));
+    }, []);
+
+    useEffect(() => {
+        if (!desktop?.onNotificationWatch) return;
+        return desktop.onNotificationWatch(watch);
+    }, [desktop, watch]);
+
     return {
         user: session?.user ?? null,
         liveUsers,
+        liveNotifications,
         error,
         loading,
         signIn,
         signOut,
         setLivePeer,
+        dismissLiveNotification,
         watch,
     };
 }

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Preserve the existing PeerJS Cloud signaling and current watch URL format.
+- Preserve the existing signaling through `peerjs.ligmacharl.es` and the current watch URL format.
 - Keep WebRTC media peer-to-peer; the new backend stores only current authenticated presence in memory.
 - Discord login is optional; anonymous broadcast and watch continue to work if the backend is unavailable.
 - Never use Electron global loopback audio. On Windows, capture audio from the selected process and its process tree only; elsewhere disable application audio.

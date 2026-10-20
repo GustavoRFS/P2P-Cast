@@ -66,7 +66,7 @@ export function getPeerError(error: unknown): AppError {
         case "ssl-unavailable":
             return {
                 title: "Conexão segura indisponível",
-                message: "O PeerJS Cloud exige uma conexão HTTPS disponível.",
+                message: "O serviço de sinalização exige uma conexão HTTPS disponível.",
             };
         case "browser-incompatible":
             return {

@@ -1,4 +1,4 @@
 {
-  "backendUrl": "http://localhost:3001",
+  "backendUrl": "https://p2p-cast-api.ligmacharl.es",
   "webUrl": "http://localhost:5173"
 }

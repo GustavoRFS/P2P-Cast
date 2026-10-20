@@ -21,10 +21,10 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
- * Hand-rolled client for the PeerJS Cloud signaling protocol — there is no
+ * Hand-rolled client for the hosted PeerServer signaling protocol — there is no
  * PeerJS SDK for Android, so this replicates the wire format peer.ts's
- * `new Peer(id, { config, debug })` speaks when no custom host/port is given
- * (PeerJS Cloud defaults: host 0.peerjs.com, port 443, secure, key "peerjs").
+ * `new Peer(id, { host, port, path, key, secure, config, debug })` speaks
+ * (host peerjs.ligmacharl.es, port 443, path "/peerjs", key "peerjs").
  *
  * Only the signaling channel lives here — SDP/ICE payload contents are
  * standard WebRTC JSEP objects (peerjs's Negotiator doesn't munge SDP in
@@ -73,10 +73,8 @@ class PeerSignalingClient(
     var onDisconnected: (() -> Unit)? = null
 
     fun connect() {
-        // Matches peerjs's Socket._baseUrl + "&id=...&token=..." exactly — no
-        // "version" param (verified against the actual peerjs 1.5.5 source;
-        // the real client never sends one).
-        val url = "wss://0.peerjs.com:443/peerjs?key=peerjs&id=$localId&token=$token"
+        // Matches peerjs 1.5.5's Socket URL, including its version parameter.
+        val url = "wss://peerjs.ligmacharl.es:443/peerjs/peerjs?key=peerjs&id=$localId&token=$token&version=1.5.5"
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(

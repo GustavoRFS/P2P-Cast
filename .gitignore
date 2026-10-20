@@ -4,6 +4,5 @@ node_modules
 !.env.example
 .playwright-mcp
 .worktrees/
-backend/whitelist.json
 desktop-tauri/config.json
 desktop-tauri/src-tauri/target/

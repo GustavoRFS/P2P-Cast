@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, safeStorage, shell, session } = require("electron");
+const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, protocol, safeStorage, shell, session, Tray } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
@@ -14,10 +14,53 @@ const APP_ORIGIN = "p2pcast-app://desktop";
 const AUTH_CODE = /^[A-Za-z0-9_-]{43}$/;
 const LOGIN_VERIFIER_TTL_MS = 10 * 60_000;
 const helperProcesses = new Map();
+const registeredProfileShortcuts = new Map();
 let mainWindow = null;
+let tray = null;
 let selectedSourceId = null;
 let pendingAuthCode = null;
 let loginVerifierTimer = null;
+
+function showMainWindow() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
+}
+
+function createTrayIcon() {
+    const pixels = Buffer.alloc(16 * 16 * 4);
+    for (let y = 0; y < 16; y += 1) {
+        for (let x = 0; x < 16; x += 1) {
+            const dx = x - 7.5;
+            const dy = y - 7.5;
+            const distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared > 54) continue;
+
+            const offset = (y * 16 + x) * 4;
+            const isCenter = distanceSquared <= 16;
+            // NativeImage bitmap bytes use BGRA on Windows.
+            pixels[offset] = isCenter ? 35 : 205;
+            pixels[offset + 1] = isCenter ? 33 : 213;
+            pixels[offset + 2] = isCenter ? 22 : 46;
+            pixels[offset + 3] = 255;
+        }
+    }
+    return nativeImage.createFromBitmap(pixels, { width: 16, height: 16 });
+}
+
+function createTray() {
+    if (process.platform !== "win32" || tray) return;
+
+    tray = new Tray(createTrayIcon());
+    tray.setToolTip("P2P-Cast");
+    tray.setContextMenu(Menu.buildFromTemplate([
+        { label: "Abrir P2P-Cast", click: showMainWindow },
+        { type: "separator" },
+        { label: "Sair", click: () => app.quit() },
+    ]));
+    tray.on("click", showMainWindow);
+}
 
 function readConfig() {
     let fileConfig = {};
@@ -37,7 +80,8 @@ function readConfig() {
         }
     }
 
-    const backendUrl = process.env.P2PCAST_BACKEND_URL || fileConfig.backendUrl || "http://localhost:3001";
+    const backendUrl = process.env.P2PCAST_BACKEND_URL || fileConfig.backendUrl
+        || (app.isPackaged ? "https://p2p-cast-api.ligmacharl.es" : "http://localhost:3001");
     const parsed = new URL(backendUrl);
     if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parsed.hostname))) {
         throw new Error("P2PCAST_BACKEND_URL must use HTTPS outside localhost");
@@ -89,7 +133,7 @@ function trustedCsp() {
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "media-src 'self' blob:",
-        `connect-src 'self' https://0.peerjs.com wss://0.peerjs.com:443 ${httpOrigin} ${socketOrigin}`,
+        `connect-src 'self' https://peerjs.ligmacharl.es wss://peerjs.ligmacharl.es:443 ${httpOrigin} ${socketOrigin}`,
         "object-src 'none'",
         "base-uri 'self'",
         "frame-ancestors 'none'",
@@ -167,6 +211,11 @@ function createWindow() {
     });
     mainWindow.webContents.on("render-process-gone", stopAllHelpers);
     mainWindow.webContents.on("destroyed", stopAllHelpers);
+    mainWindow.on("minimize", event => {
+        if (process.platform !== "win32") return;
+        event.preventDefault();
+        mainWindow?.hide();
+    });
 
     const devUrl = process.env.P2PCAST_RENDERER_URL;
     if (devUrl) {
@@ -285,6 +334,92 @@ function sourceWindowHandle(sourceId) {
     } catch {
         return null;
     }
+}
+
+function captureTargetSelector(kind, source) {
+    if (kind === "monitor") {
+        const displayId = typeof source.display_id === "string" ? source.display_id.trim() : "";
+        const name = source.name.trim().toLocaleLowerCase("en-US");
+        return `monitor:${displayId || name}`;
+    }
+    return `window:${source.name.trim().toLocaleLowerCase("en-US")}`;
+}
+
+async function listCaptureTargets() {
+    const sources = await desktopCapturer.getSources({
+        types: ["window", "screen"],
+        thumbnailSize: { width: 320, height: 180 },
+        fetchWindowIcons: true,
+    });
+    return sources.map(source => {
+        const kind = source.id.startsWith("screen:") ? "monitor" : "window";
+        return {
+            id: source.id,
+            selector: captureTargetSelector(kind, source),
+            kind,
+            name: source.name.trim() || (kind === "monitor" ? "Monitor" : "Janela sem título"),
+            thumbnailDataUrl: source.thumbnail.toDataURL(),
+        };
+    });
+}
+
+function normalizeElectronAccelerator(rawShortcut) {
+    if (typeof rawShortcut !== "string" || rawShortcut.length > 80) return null;
+    const parts = rawShortcut.split("+").map(part => part.trim());
+    if (parts.length < 2 || parts.some(part => !part)) return null;
+    const modifiers = parts.slice(0, -1);
+    const modifierMap = new Map([["ctrl", "Control"], ["alt", "Alt"], ["shift", "Shift"], ["super", "Super"]]);
+    const normalizedModifiers = modifiers.map(modifier => modifierMap.get(modifier.toLowerCase()));
+    if (normalizedModifiers.some(modifier => !modifier)
+        || new Set(normalizedModifiers).size !== modifiers.length) return null;
+
+    let key = parts.at(-1);
+    if (/^[a-z]$/i.test(key)) key = key.toUpperCase();
+    else if (/^f(?:[1-9]|1[0-9]|2[0-4])$/i.test(key)) key = key.toUpperCase();
+    else if (key.toLowerCase() === "escape") key = "Esc";
+    else if (key.toLowerCase() === "space") key = "Space";
+    else if (!/^(?:[0-9]|Tab|Enter|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|PrintScreen|Pause)$/i.test(key)) return null;
+    return [...normalizedModifiers, key].join("+");
+}
+
+function registerProfileShortcuts(event, registrations) {
+    assertMainFrame(event);
+    if (!Array.isArray(registrations) || registrations.length > 64) throw new TypeError("Invalid shortcut profiles");
+
+    for (const accelerator of registeredProfileShortcuts.values()) {
+        globalShortcut.unregister(accelerator);
+    }
+    registeredProfileShortcuts.clear();
+
+    const seen = new Set();
+    return registrations.map(registration => {
+        const id = registration?.id;
+        const accelerator = normalizeElectronAccelerator(registration?.shortcut);
+        if (typeof id !== "string" || id.length === 0 || id.length > 80 || !accelerator) {
+            return { id: typeof id === "string" ? id : "", ok: false, error: "invalid" };
+        }
+        if (seen.has(accelerator.toLowerCase())) return { id, ok: false, error: "duplicate" };
+        seen.add(accelerator.toLowerCase());
+        try {
+            const registered = globalShortcut.register(accelerator, () => {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send("desktop:shortcut:profile", id);
+                }
+            });
+            if (!registered) return { id, ok: false, error: "unavailable" };
+            registeredProfileShortcuts.set(id, accelerator);
+            return { id, ok: true };
+        } catch {
+            return { id, ok: false, error: "unavailable" };
+        }
+    });
+}
+
+function unregisterProfileShortcuts() {
+    for (const accelerator of registeredProfileShortcuts.values()) {
+        globalShortcut.unregister(accelerator);
+    }
+    registeredProfileShortcuts.clear();
 }
 
 function sendAudioBytes(capture, bytes) {
@@ -406,6 +541,30 @@ function registerIpc() {
         return readConfig();
     });
 
+    ipcMain.handle("desktop:notifications:live", (event, value) => {
+        assertMainFrame(event);
+        if (typeof value !== "object" || value === null) throw new TypeError("Invalid live notification");
+        const { username, peerId } = value;
+        if (typeof username !== "string" || typeof peerId !== "string"
+            || !/^[A-Za-z0-9_-]{1,128}$/.test(peerId)) {
+            throw new TypeError("Invalid live notification");
+        }
+        if (process.platform !== "win32" || !Notification.isSupported()) return;
+
+        const safeUsername = username.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) || "Um amigo";
+        const notification = new Notification({
+            title: "P2P-Cast",
+            body: `${safeUsername} começou uma transmissão.`,
+        });
+        notification.on("click", () => {
+            showMainWindow();
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send("desktop:notifications:watch", peerId);
+            }
+        });
+        notification.show();
+    });
+
     ipcMain.handle("desktop:capture:list", async event => {
         assertMainFrame(event);
         const sources = await desktopCapturer.getSources({
@@ -420,9 +579,25 @@ function registerIpc() {
         }));
     });
 
+    ipcMain.handle("desktop:capture:targets", async event => {
+        assertMainFrame(event);
+        return listCaptureTargets();
+    });
+
+    ipcMain.handle("desktop:capture:resolve", async (event, selector) => {
+        assertMainFrame(event);
+        if (typeof selector !== "string" || selector.length === 0 || selector.length > 2048) return null;
+        const matches = (await listCaptureTargets()).filter(target => target.selector === selector);
+        return matches.length === 1 ? matches[0] : null;
+    });
+
+    ipcMain.handle("desktop:shortcuts:register", (event, registrations) => {
+        return registerProfileShortcuts(event, registrations);
+    });
+
     ipcMain.handle("desktop:capture:select", event, sourceId => {
         assertMainFrame(event);
-        if (typeof sourceId !== "string" || sourceId.length > 256 || !sourceId.startsWith("window:")) {
+        if (typeof sourceId !== "string" || sourceId.length > 256 || !/^(?:window|screen):/.test(sourceId)) {
             throw new TypeError("Invalid desktop window id");
         }
         selectedSourceId = sourceId;
@@ -554,6 +729,8 @@ const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
     app.quit();
 } else {
+    if (process.platform === "win32") app.setAppUserModelId("com.p2pcast.desktop");
+
     app.on("open-url", (event, url) => {
         event.preventDefault();
         sendAuthCode(url);
@@ -562,10 +739,7 @@ if (!singleInstance) {
     app.on("second-instance", (_event, argv) => {
         const deepLink = argv.find(argument => argument.startsWith("p2pcast://"));
         if (deepLink) sendAuthCode(deepLink);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.focus();
-        }
+        showMainWindow();
     });
 
     if (process.defaultApp && process.argv[1]) {
@@ -586,7 +760,7 @@ if (!singleInstance) {
                 return;
             }
             try {
-                const sources = await desktopCapturer.getSources({ types: ["window"], thumbnailSize: { width: 0, height: 0 } });
+                const sources = await desktopCapturer.getSources({ types: ["window", "screen"], thumbnailSize: { width: 0, height: 0 } });
                 const selected = sources.find(source => source.id === wantedId);
                 callback(selected ? { video: selected } : {});
             } catch {
@@ -596,9 +770,15 @@ if (!singleInstance) {
         createWindow();
         const coldStartLink = process.argv.find(argument => argument.startsWith("p2pcast://"));
         if (coldStartLink) sendAuthCode(coldStartLink);
+        createTray();
     });
 
-    app.on("before-quit", stopAllHelpers);
+    app.on("before-quit", () => {
+        tray?.destroy();
+        tray = null;
+        unregisterProfileShortcuts();
+        stopAllHelpers();
+    });
     app.on("window-all-closed", () => {
         if (process.platform !== "darwin") app.quit();
     });

@@ -22,11 +22,15 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: wss: http://localhost:3001 http://127.0.0.1:3001 ws://localhost:3001 ws://127.0.0.1:3001 https://0.peerjs.com wss://0.peerjs.com:443; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: wss: http://localhost:3001 http://127.0.0.1:3001 ws://localhost:3001 ws://127.0.0.1:3001 https://peerjs.ligmacharl.es wss://peerjs.ligmacharl.es:443; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "../../desktop/resources/p2pcast-process-audio.exe": "p2pcast-process-audio.exe",
+      "../../desktop/resources/p2pcast-wgc-capture.exe": "p2pcast-wgc-capture.exe"
+    },
     "category": "SocialNetworking",
     "shortDescription": "Transmissão P2P entre amigos",
     "windows": {

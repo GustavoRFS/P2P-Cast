@@ -6,7 +6,7 @@ Adicionar ao P2P-Cast um cliente desktop que reutiliza a interface React e o pro
 
 ## Limites e compatibilidade
 
-- PeerJS Cloud continua responsável pela sinalização WebRTC existente. A mídia continua ponto a ponto; o novo backend não transporta mídia nem substitui o formato de sala atual.
+- O PeerServer em `peerjs.ligmacharl.es` continua responsável pela sinalização WebRTC existente. A mídia continua ponto a ponto; o novo backend não transporta mídia nem substitui o formato de sala atual.
 - A aplicação desktop será Electron para reutilizar Chromium, React, PeerJS e `getDisplayMedia`.
 - A lista de janelas vem de `desktopCapturer` e a solicitação de captura seleciona exatamente a fonte escolhida entre as fontes expostas pelo sistema. Wayland/PipeWire pode expor somente a tela inteira. O áudio de loopback global do Electron nunca será usado.
 - Áudio isolado por processo será fornecido no Windows por um utilitário C++ com WASAPI Application Loopback. A captura de áudio fica disponível a partir do Windows 10 build 20348. Em macOS e Linux, o áudio do aplicativo fica desativado até haver um capturador nativo isolado para a plataforma. A seleção de vídeo segue as fontes de janela expostas pelo sistema; no Linux com Wayland/PipeWire pode haver somente a tela inteira. Microfone e câmera continuam seguindo as opções existentes.

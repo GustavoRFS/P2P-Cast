@@ -5,9 +5,9 @@ O projeto mantém três clientes compatíveis com o mesmo protocolo PeerJS:
 - `web/`: React/Vite para transmitir e assistir pelo navegador.
 - `android/`: aplicativo Android atual.
 - `desktop/`: cliente Electron que reaproveita a interface React. Ele mantém os mesmos links PeerJS, adiciona login Discord opcional e mostra usuários autorizados ao vivo.
-- `backend/`: serviço Bun/Elysia para OAuth Discord, whitelist JSON e presença em tempo real. Ele não recebe vídeo nem áudio.
+- `backend/`: serviço Bun/Elysia para OAuth Discord, validação de membros de um servidor e presença em tempo real. Ele não recebe vídeo nem áudio.
 
-## Backend e whitelist Discord
+## Backend e acesso pelo servidor Discord
 
 Requisitos: Bun, Node.js para a compilação TypeScript e npm.
 
@@ -15,7 +15,6 @@ Requisitos: Bun, Node.js para a compilação TypeScript e npm.
 cd backend
 bun install
 cp .env.example .env
-cp whitelist.example.json whitelist.json
 bun run dev
 ```
 
@@ -23,19 +22,18 @@ Edite `backend/.env` e configure:
 
 - `PUBLIC_URL`: origin público do backend, sem barra final.
 - `DISCORD_CLIENT_ID` e `DISCORD_CLIENT_SECRET`: credenciais de uma aplicação criada no Discord Developer Portal.
+- `DISCORD_GUILD_ID`: ID do servidor cujos membros podem entrar no P2P-Cast. O backend pede o escopo OAuth `guilds.members.read` e consulta somente a associação a esse servidor; não é necessário instalar um bot.
 - `DISCORD_REDIRECT_URI`: URL pública `${PUBLIC_URL}/auth/discord/callback`, também cadastrada como redirect URI no Discord.
 - `JWT_SECRET`: segredo aleatório com pelo menos 32 caracteres.
 - `NODE_ENV=development` habilita valores locais durante desenvolvimento. Em produção, defina `NODE_ENV=production` e configure todos os segredos; fora do modo de desenvolvimento o backend falha ao iniciar se faltar qualquer um deles.
 - `APP_ORIGINS`: origins exatos dos clientes desktop. Inclua `p2pcast-app://desktop` para Electron e `http://tauri.localhost` (Windows) e `tauri://localhost` (macOS/Linux) para Tauri. Durante desenvolvimento, inclua também `http://127.0.0.1:5173` e `http://localhost:5173`.
-
-`whitelist.example.json` mostra o formato. Em `whitelist.json`, mantenha apenas strings com os IDs Discord autorizados. O arquivo real é ignorado pelo Git. Se ele não existir, nenhum usuário pode entrar. O serviço consulta a whitelist em cada login, e qualquer edição passa a valer no próximo login.
 
 Para desenvolvimento local, use `PUBLIC_URL=http://localhost:3001` e registre exatamente `http://localhost:3001/auth/discord/callback` na aplicação Discord, se permitido pela configuração OAuth. Para disponibilizar login a outros computadores, publique o backend atrás de HTTPS e registre o redirect URI HTTPS correspondente. O OAuth exige que `DISCORD_REDIRECT_URI` corresponda ao valor usado no login.
 
 Endpoints principais:
 
 - `GET /auth/discord`: inicia login Discord.
-- `GET /auth/discord/callback`: confere state, consulta a identidade e a whitelist.
+- `GET /auth/discord/callback`: confere state, valida a participação no servidor e consulta a identidade.
 - `POST /auth/exchange`: troca um código de uso único por JWT.
 - `GET /api/me`: valida a sessão atual.
 - `WS /api/presence`: recebe peer IDs e publica somente usuários ao vivo.
@@ -51,7 +49,7 @@ npm ci
 npm run dev
 ```
 
-Para um build web: `npm run build`. O app web continua usando PeerJS Cloud para sinalização e WebRTC direto para vídeo/áudio. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
+Para um build web: `npm run build`. O app web usa `peerjs.ligmacharl.es` para sinalização e WebRTC direto para vídeo/áudio. Sem TURN, algumas redes restritivas podem impedir uma conexão P2P direta.
 
 ## Desktop
 
@@ -66,7 +64,9 @@ Durante desenvolvimento, `desktop/config.json` configura o backend e a URL do cl
 
 No app empacotado, coloque `config.json` na pasta `resources` ao lado do executável dentro da pasta de recursos do Electron, ou use `P2PCAST_CONFIG_PATH`. Copie o formato de `desktop/config.example.json` e troque os dois endereços. O app usa o protocolo seguro `p2pcast-app://desktop` para os arquivos locais; `p2pcast://` recebe o retorno OAuth do Electron e `p2pcast-tauri://` o do Tauri. O backend prende o host ao `state` OAuth; logins antigos sem identificação de host continuam usando o retorno Electron.
 
-O login Discord é opcional para iniciar uma transmissão. Contas fora da whitelist são recusadas, e usuários anônimos ainda podem transmitir e assistir por link PeerJS. Com login, o app mostra as contas autorizadas que estão transmitindo e permite abrir a live pelo peer ID.
+O login Discord é opcional para iniciar uma transmissão. Contas que não pertencem ao servidor configurado são recusadas no login, e usuários anônimos ainda podem transmitir e assistir por link PeerJS. Com login, o app mostra membros autorizados que estão transmitindo e permite abrir a live pelo peer ID. A associação é verificada no login; sessões existentes continuam válidas até expirarem.
+
+No desktop Electron para Windows, uma nova transmissão de outro usuário autorizado gera um aviso dentro do app e uma notificação do Windows. Ao clicar no aviso, o P2P-Cast abre a transmissão. Minimizar a janela esconde o app na bandeja; use o ícone para restaurar a janela ou sair. Os avisos exigem login Discord e conexão ativa com o backend de presença.
 
 ## Captura de um aplicativo
 
@@ -103,8 +103,10 @@ Configure `backendUrl` e `webUrl` em `desktop-tauri/config.json` durante o desen
 
 Para gerar um instalador no sistema atual, use `npm run build`; para escolher um formato, use `npm run build:windows`, `npm run build:macos` ou `npm run build:linux` dentro de `desktop-tauri/`. O Tauri usa o WebView do sistema operacional (WebView2 no Windows, WKWebView no macOS e WebKitGTK no Linux); por isso, compare tanto o tamanho do instalador quanto o tamanho instalado. O bootstrapper do WebView2 pode instalar um runtime externo no Windows.
 
-O seletor nativo do Tauri pede que a pessoa escolha uma janela. A aplicação confere que o WebView retornou uma janela e encerra a captura se o sistema devolver a tela inteira. O áudio da janela e o áudio do sistema ficam desligados no Tauri; assim a transmissão não leva sons do Discord, Spotify ou outros aplicativos. O microfone continua opcional. A versão Tauri ainda não envia o áudio do jogo. Para desempenho, rode Electron e Tauri no mesmo computador com a mesma resolução, FPS, bitrate, conta e número de espectadores, e compare CPU e memória durante a transmissão. Como o Tauri não inclui áudio isolado, a medição de mídia não é idêntica.
+O Tauri lista janelas e monitores e oferece dois métodos nos perfis de atalho: captura direta por Windows Graphics Capture (WGC), que usa o alvo salvo, e o seletor do Windows, que pede uma escolha a cada início. A captura WGC está disponível quando o helper nativo foi compilado e incluído no pacote; requer Windows 10 versão 1903 ou posterior. Os perfis guardam o alvo de vídeo, o programa de áudio e a combinação global; o áudio usa o helper WASAPI e nunca usa loopback global.
+
+Antes de empacotar no Windows, compile os dois helpers nativos em `desktop/` com `npm run build:audio:windows`. O comando gera e copia `desktop/resources/p2pcast-process-audio.exe` e `desktop/resources/p2pcast-wgc-capture.exe`; o pacote Tauri inclui ambos. A integração WGC e o build de frontend passam nas verificações disponíveis aqui, mas a compilação dos helpers e a captura/teardown precisam de validação em uma máquina Windows. Para comparar desempenho, rode Electron e Tauri no mesmo computador com resolução, FPS, bitrate, conta e número de espectadores iguais.
 
 ## Compatibilidade do protocolo
 
-PeerJS Cloud continua fazendo a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.
+O PeerServer em `peerjs.ligmacharl.es` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.

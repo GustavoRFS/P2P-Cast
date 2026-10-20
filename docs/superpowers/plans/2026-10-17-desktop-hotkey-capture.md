@@ -123,12 +123,12 @@
 - Native bridge commands: `start_direct_video_capture(source_id, settings) -> VideoCaptureDescriptor`, `stop_direct_video_capture(capture_id) -> ()`, and event subscription for video frames/metadata according to the approved Task 1 bridge.
 - `captureDesktopWindow(target, settings, desktopConfig, options)` accepts a freshly resolved target and `options: { captureMethod: "windows-picker" | "direct", audioSourceId: string }` and returns one owned `MediaStream`; the returned tracks use the existing release lifecycle.
 
-- [ ] Implement WGC capture-item creation for validated HWND and HMONITOR source IDs, frame pool/session startup, resize/device-loss handling, and capture-ID ownership.
-- [ ] Connect the Task 1 bridge to a renderer `MediaStreamTrack` adapter and cap frame work to requested FPS/resolution without raw full-frame Tauri event forwarding.
-- [ ] Add stop/error paths that close frame pools, sessions, bridge resources, and video tracks exactly once.
-- [ ] Preserve the Windows picker path with `getDisplayMedia`, enabling both windows and monitors; validate cancellation and unsupported selections.
-- [ ] Merge the explicitly selected WASAPI process audio into the selected video stream using the existing shared capture path; never fall back to system audio.
-- [ ] Run TypeScript build plus native compile checks available in the environment; verify capture and teardown on Windows before marking the Tauri direct mode complete.
+- [x] Implement WGC capture-item creation for validated HWND and HMONITOR source IDs, frame pool/session startup, resize handling, failure signaling, and capture-ID ownership.
+- [x] Connect the shared-buffer bridge to a renderer canvas `captureStream()` adapter and cap frame work to requested FPS/resolution without raw full-frame Tauri events.
+- [x] Add stop/error paths that close helper/frame-pool sessions, bridge buffers, and video tracks.
+- [x] Preserve the Windows picker path with `getDisplayMedia` for windows and monitors.
+- [x] Merge the explicitly selected WASAPI process audio into the selected video stream using the existing shared capture path; never fall back to system audio.
+- [ ] Verify helper compilation, capture behavior, picker cancellation, and teardown on Windows before marking Tauri direct mode runtime-verified.
 
 ### Task 6: Add profile management UI and connect host activation to broadcast
 

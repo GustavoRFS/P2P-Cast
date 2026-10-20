@@ -1,5 +1,4 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { Elysia, t } from "elysia";
 import { SignJWT, jwtVerify } from "jose";
 import type { BackendConfig } from "./config";
@@ -48,21 +47,6 @@ function secureTextEqual(left: string, right: string): boolean {
     const leftBytes = Buffer.from(left);
     const rightBytes = Buffer.from(right);
     return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
-}
-
-async function readWhitelist(path: string): Promise<Set<string>> {
-    let raw: string;
-    try {
-        raw = await readFile(path, "utf8");
-    } catch (error) {
-        if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return new Set();
-        throw error;
-    }
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || !parsed.every(value => typeof value === "string" && DISCORD_SNOWFLAKE.test(value))) {
-        throw new Error("Whitelist must be a JSON array of Discord user IDs");
-    }
-    return new Set(parsed);
 }
 
 function toProfile(user: DiscordUserResponse): DiscordProfile | null {
@@ -135,7 +119,7 @@ export function createAuthRoutes(config: BackendConfig) {
             const authorizationUrl = new URL("https://discord.com/oauth2/authorize");
             authorizationUrl.searchParams.set("client_id", config.discordClientId);
             authorizationUrl.searchParams.set("response_type", "code");
-            authorizationUrl.searchParams.set("scope", "identify");
+            authorizationUrl.searchParams.set("scope", "identify guilds.members.read");
             authorizationUrl.searchParams.set("redirect_uri", config.discordRedirectUri);
             authorizationUrl.searchParams.set("state", state);
 
@@ -178,6 +162,17 @@ export function createAuthRoutes(config: BackendConfig) {
                     && typeof tokenData.access_token === "string" ? tokenData.access_token : null;
                 if (!discordToken) return htmlResponse(502, "Falha no login", "O Discord retornou uma resposta inválida.");
 
+                const membershipResponse = await fetch(
+                    `https://discord.com/api/v10/users/@me/guilds/${config.discordGuildId}/member`,
+                    { headers: { authorization: `Bearer ${discordToken}` } },
+                );
+                if (membershipResponse.status === 403 || membershipResponse.status === 404) {
+                    return htmlResponse(403, "Acesso não autorizado", "Entre no servidor Discord do P2P-Cast e tente novamente.");
+                }
+                if (!membershipResponse.ok) {
+                    return htmlResponse(502, "Falha no login", "Não foi possível verificar sua participação no servidor Discord.");
+                }
+
                 const userResponse = await fetch("https://discord.com/api/v10/users/@me", {
                     headers: { authorization: `Bearer ${discordToken}` },
                 });
@@ -185,9 +180,6 @@ export function createAuthRoutes(config: BackendConfig) {
 
                 const user = toProfile(await userResponse.json() as DiscordUserResponse);
                 if (!user) return htmlResponse(502, "Falha no login", "O Discord retornou uma conta inválida.");
-                if (!(await readWhitelist(config.whitelistPath)).has(user.id)) {
-                    return htmlResponse(403, "Acesso não autorizado", "Esta conta Discord ainda não está na whitelist do P2P-Cast.");
-                }
 
                 for (const [code, entry] of exchangeCodes) {
                     if (entry.expiresAt <= Date.now()) exchangeCodes.delete(code);

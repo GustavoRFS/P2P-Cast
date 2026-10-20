@@ -10,7 +10,7 @@ Create `app-react-native/`, an Android-first Expo and React Native client for br
 
 ## Context
 
-- `web/` uses PeerJS Cloud for signaling and direct WebRTC for media. A watch link contains `?watch=<peer-id>` and the signaling service does not carry media.
+- `web/` uses the PeerServer at `peerjs.ligmacharl.es` for signaling and direct WebRTC for media. A watch link contains `?watch=<peer-id>` and the signaling service does not carry media.
 - `android/` implements the PeerJS signaling envelope with a Kotlin WebSocket client and WebRTC sessions. It captures Android screen and camera video, sends a microphone track with camera video when enabled, handles chat data channels, and limits each viewer session to two media connections.
 - The existing web client can publish screen video and audio plus camera video and microphone audio. Android's existing capture settings include a screen-audio toggle, but the current RTC broadcaster only adds the microphone track for camera video. The new client must report actual screen-audio capability and must not show an enabled control when it cannot deliver that audio.
 - The web design uses a near-black navy background (`#07111f`), dark blue panels, pale text, muted blue secondary text, and cyan highlights (`#75e5e0`). Its home screen has a large two-line headline and a compact settings panel; live screens make the video stage primary, with secondary controls and chat.
@@ -23,7 +23,7 @@ Create `app-react-native/`, an Android-first Expo and React Native client for br
 - Use Expo SDK 57, the latest stable SDK shown in the Expo reference as of this spec date. Use its compatible `expo-video` package (currently documented as `~57.0.5`) as the supported-library check, and install Expo packages with `npx expo install`.
 - Use Expo Router for app routes and watch-link handling. Give the app a unique Android application ID so it installs beside `com.p2pcast.android`.
 - Use React Native screens for the home, broadcast, and viewer flows. Use a local Expo module implemented in Kotlin for the Android media engine, screen capture, camera capture, native WebRTC video rendering, and PiP.
-- Preserve the current PeerJS Cloud signaling and WebRTC media protocol. Do not add a media server, change the existing clients' wire format, or require the backend for live video.
+- Preserve the current signaling through `peerjs.ligmacharl.es` and the WebRTC media protocol. Do not add a media server, change the existing clients' wire format, or require the backend for live video.
 - Configure EAS Update, including the EAS project association, a CLI-generated runtime/update configuration, and separate `preview` and `production` update channels. Configuration does not publish an update or start a build.
 - OTA updates carry compatible JavaScript and assets. Changes to the native module, native permissions, or native dependencies require a new native binary; runtime compatibility must follow the EAS-generated policy.
 
@@ -57,7 +57,7 @@ Screen audio is optional and may be unavailable on Android versions or source ap
 
 ### Signaling and session compatibility
 
-- Use the same PeerJS Cloud WebSocket endpoint, heartbeat cadence, SDP/ICE payload envelope, connection IDs, metadata roles, and chat JSON fields as the current clients.
+- Use the same `peerjs.ligmacharl.es` WebSocket endpoint, heartbeat cadence, SDP/ICE payload envelope, connection IDs, metadata roles, and chat JSON fields as the current clients.
 - Keep screen and camera as separate media connections so existing web and Android clients can request either track. When publishing both, use the viewer identity/session metadata already understood by the current broadcaster.
 - Keep the existing STUN-only policy and its connectivity ceiling. Do not silently add a TURN service.
 - Retain the current broadcast-ID behavior and generate the ordinary web watch URL using the configured live-site origin. The Expo viewer accepts a pasted/shared web URL with `?watch=<id>`, a raw peer ID, and the app's `p2pcast-react-native://watch/<id>` deep link. Verified Android HTTPS App Links require the web host's Digital Asset Links file to include the new package and signing fingerprints; they are a deployment dependency, and if enabled later must preserve browser fallback and the existing web URL.

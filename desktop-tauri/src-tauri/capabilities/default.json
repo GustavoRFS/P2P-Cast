@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:event:default",
-    "deep-link:allow-get-current"
+    "deep-link:allow-get-current",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister-all"
   ]
 }

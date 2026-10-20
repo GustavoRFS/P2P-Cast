@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Construir um app React estático que compartilhe uma transmissão de tela por WebRTC usando PeerJS Cloud para sinalização e um link com o ID do transmissor.
+**Goal:** Construir um app React estático que compartilhe uma transmissão de tela por WebRTC usando o PeerServer em `peerjs.ligmacharl.es` para sinalização e um link com o ID do transmissor.
 
-**Architecture:** O frontend cria um peer PeerJS para o transmissor e outro para cada espectador. O PeerJS Cloud troca a sinalização; a mídia usa WebRTC diretamente entre os navegadores quando ICE consegue uma rota direta. O app usa query string (`?watch=<peer-id>`) para decidir entre tela inicial, transmissão e espectador, sem roteador ou backend próprio.
+**Architecture:** O frontend cria um peer PeerJS para o transmissor e outro para cada espectador. O PeerServer em `peerjs.ligmacharl.es` troca a sinalização; a mídia usa WebRTC diretamente entre os navegadores quando ICE consegue uma rota direta. O app usa query string (`?watch=<peer-id>`) para decidir entre tela inicial, transmissão e espectador, sem roteador ou backend próprio.
 
 **Tech Stack:** React, TypeScript, Vite, PeerJS (`peerjs`), Vitest para helpers puros, CSS nativo.
 
@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- O MVP usa PeerJS Cloud/PeerServer como canal de sinalização.
+- O MVP usa o PeerServer em `peerjs.ligmacharl.es` como canal de sinalização.
 - A configuração ICE usa `stun:stun.l.google.com:19302` e não inclui TURN.
 - A fonte da transmissão é `navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })`.
-- O vídeo não é enviado para a Vercel nem para o PeerJS Cloud quando a conexão direta funciona.
+- O vídeo não é enviado para a Vercel nem para o PeerServer quando a conexão direta funciona.
 - Qualquer pessoa que possua o link poderá tentar assistir.
 - O app deve funcionar como frontend estático hospedado em HTTPS na Vercel.
 - A verificação inclui `npm run test`, `npm run build` e teste manual em duas janelas.
@@ -124,7 +124,7 @@
 - Create: `src/types.ts`
 
 **Interfaces:**
-- `createPeer(): Peer` returns a PeerJS client configured with the default PeerJS Cloud endpoint and explicit Google STUN.
+- `createPeer(): Peer` returns a PeerJS client configured with `peerjs.ligmacharl.es` and explicit Google STUN.
 - `PeerConfig` remains local to `src/lib/peer.ts` and contains `iceServers: [{ urls: "stun:stun.l.google.com:19302" }]` and `sdpSemantics: "unified-plan"`.
 - `StreamMode` is ``idle` | `starting` | `broadcasting` | `connecting` | `watching` | `error``.
 
@@ -187,7 +187,7 @@
 
 **Interfaces:**
 - The UI must remain usable on a narrow phone viewport and a desktop window.
-- The README explains local development, Vercel deployment, HTTPS, PeerJS Cloud signaling, STUN limitations and manual two-browser testing.
+- The README explains local development, Vercel deployment, HTTPS, hosted PeerServer signaling, STUN limitations and manual two-browser testing.
 
 - [ ] **Step 1: Add the responsive visual system**
 
@@ -199,7 +199,7 @@
 
 - [ ] **Step 3: Document Vercel deployment and limitations**
 
-  Include `npm install`, `npm run dev`, `npm run build`, importing the repository into Vercel, and the facts that the app needs HTTPS, PeerJS Cloud is signaling-only, STUN may fail on restrictive NATs, and the broadcaster’s upload grows with viewers.
+  Include `npm install`, `npm run dev`, `npm run build`, importing the repository into Vercel, and the facts that the app needs HTTPS, the PeerServer is signaling-only, STUN may fail on restrictive NATs, and the broadcaster’s upload grows with viewers.
 
 ### Task 6: Verify the delivered app
 

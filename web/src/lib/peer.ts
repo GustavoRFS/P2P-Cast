@@ -2,6 +2,11 @@ import Peer from "peerjs";
 import type { Peer as PeerInstance } from "peerjs";
 
 const peerOptions = {
+    host: "peerjs.ligmacharl.es",
+    port: 443,
+    path: "/peerjs",
+    key: "peerjs",
+    secure: true,
     config: {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     },

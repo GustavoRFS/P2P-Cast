@@ -6,7 +6,7 @@ Criar uma aplicação web React que permita a uma pessoa iniciar uma transmissã
 
 ## Limite técnico assumido
 
-O MVP usará o PeerJS Cloud/PeerServer como canal de sinalização. Esse serviço troca IDs, ofertas, respostas e candidatos ICE, mas não deve transportar o vídeo quando uma rota P2P direta puder ser estabelecida. A configuração de ICE usará `stun:stun.l.google.com:19302`.
+O MVP usará o PeerServer em `peerjs.ligmacharl.es` como canal de sinalização. Esse serviço troca IDs, ofertas, respostas e candidatos ICE, mas não deve transportar o vídeo quando uma rota P2P direta puder ser estabelecida. A configuração de ICE usará `stun:stun.l.google.com:19302`.
 
 STUN não garante conexão em todas as redes. Sem TURN, algumas combinações de NAT/firewall falharão e a interface deverá explicar que a rede não permitiu uma conexão direta. Adicionar TURN fica fora do MVP.
 
@@ -14,7 +14,7 @@ STUN não garante conexão em todas as redes. Sem TURN, algumas combinações de
 
 1. O transmissor clica em “Iniciar transmissão”.
 2. O navegador solicita permissão para compartilhar tela e áudio via `getDisplayMedia`.
-3. O app cria um `Peer` e espera o ID ser registrado no PeerJS Cloud.
+3. O app cria um `Peer` e espera o ID ser registrado no PeerServer em `peerjs.ligmacharl.es`.
 4. O app mostra uma URL com o ID do transmissor e oferece cópia para a área de transferência.
 5. Um espectador abre a URL, o app cria seu `Peer` e chama o ID do transmissor com uma faixa de vídeo preta e uma faixa de áudio silenciosa geradas localmente, sem pedir acesso à câmera ou ao microfone. Isso atende à exigência atual do método `peer.call` e permite que o transmissor devolva a mídia real.
 6. O transmissor atende a chamada e envia seu `MediaStream`.
@@ -26,7 +26,7 @@ Cada espectador usa uma conexão separada com o transmissor. Portanto, o upload 
 ## Estrutura
 
 - `src/App.tsx`: roteamento simples por query string, telas e orquestração do fluxo.
-- `src/lib/peer.ts`: criação do PeerJS com PeerJS Cloud e configuração STUN.
+- `src/lib/peer.ts`: criação do PeerJS com o PeerServer hospedado e configuração STUN.
 - `src/types.ts`: estados e tipos compartilhados.
 - `src/index.css`: interface responsiva e estados visuais.
 
@@ -42,7 +42,7 @@ Cada espectador usa uma conexão separada com o transmissor. Portanto, o upload 
 - O app não terá contas nem controle de acesso no MVP.
 - Qualquer pessoa que possua o link poderá tentar entrar na transmissão.
 - O viewer não compartilha mídia pessoal; suas faixas de negociação são artificiais, silenciosas e descartadas ao sair.
-- O vídeo usará a conexão WebRTC criptografada pelo navegador, mas a sinalização ainda passará pelo PeerJS Cloud.
+- O vídeo usará a conexão WebRTC criptografada pelo navegador, mas a sinalização ainda passará pelo PeerServer.
 - `getDisplayMedia` normalmente exige HTTPS, exceto em `localhost`.
 
 ## Verificação
