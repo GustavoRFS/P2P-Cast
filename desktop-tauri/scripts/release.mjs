@@ -56,7 +56,9 @@ if (!env.TAURI_SIGNING_PRIVATE_KEY) {
 env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
 
 if (!flag("--skip-build")) {
-    const build = spawnSync("npm", ["run", "build:windows"], { cwd: root, env, stdio: "inherit", shell: true });
+    // npm is a .cmd on Windows, so it needs a shell; a single command string keeps Node from
+    // warning about unescaped arguments.
+    const build = spawnSync("npm run build:windows", { cwd: root, env, stdio: "inherit", shell: true });
     if (build.status !== 0) fail("the build failed");
 }
 
