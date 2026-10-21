@@ -9,10 +9,15 @@ type LiveRecord = {
     updatedAt: number;
 };
 
+// "invisible" users receive presence but are left out of everyone else's list, even while live;
+// "busy" is shown to others (their own client suppresses notifications).
+type PresenceStatus = "online" | "busy" | "invisible";
+
 type PresenceRecord = {
     user: DiscordProfile;
     peerId: string | null;
     activity: string | null;
+    status: Exclude<PresenceStatus, "invisible">;
     updatedAt: number;
 };
 
@@ -24,9 +29,14 @@ type PresenceSocket = {
 };
 
 type ClientMessage =
-    | { type: "auth"; token: string }
+    | { type: "auth"; token: string; status?: PresenceStatus }
     | { type: "live"; peerId: string; activity?: string }
-    | { type: "offline" };
+    | { type: "offline" }
+    | { type: "status"; status: PresenceStatus };
+
+function parseStatus(value: unknown): PresenceStatus | undefined {
+    return value === "online" || value === "busy" || value === "invisible" ? value : undefined;
+}
 
 function parseMessage(value: unknown): ClientMessage | null {
     let parsed = value;
@@ -40,7 +50,12 @@ function parseMessage(value: unknown): ClientMessage | null {
     if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) return null;
     const message = parsed as Record<string, unknown>;
     if (message.type === "auth" && typeof message.token === "string" && message.token.length <= 4096) {
-        return { type: "auth", token: message.token };
+        // Older clients send no status and count as online.
+        return { type: "auth", token: message.token, status: parseStatus(message.status) };
+    }
+    if (message.type === "status") {
+        const status = parseStatus(message.status);
+        return status ? { type: "status", status } : null;
     }
     if (message.type === "live" && typeof message.peerId === "string") {
         return {
@@ -70,17 +85,21 @@ export function createPresenceRouter(
     const sockets = new Map<string, PresenceSocket>();
     const usersBySocket = new Map<string, DiscordProfile>();
     const liveBySocket = new Map<string, LiveRecord>();
+    const statusBySocket = new Map<string, PresenceStatus>();
     const authenticationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
     // Everyone authenticated has the app open, tray included; peerId is null until they go live.
     const currentUsers = () => {
         const unique = new Map<string, PresenceRecord>();
         for (const [socketId, user] of usersBySocket) {
+            const status = statusBySocket.get(socketId) ?? "online";
+            if (status === "invisible") continue;
             const live = liveBySocket.get(socketId);
             const record: PresenceRecord = {
                 user,
                 peerId: live?.peerId ?? null,
                 activity: live?.activity ?? null,
+                status,
                 updatedAt: live?.updatedAt ?? 0,
             };
             const current = unique.get(user.id);
@@ -92,12 +111,13 @@ export function createPresenceRouter(
 
         return [...unique.values()]
             .sort((left, right) => left.user.username.localeCompare(right.user.username))
-            .map(({ user, peerId, activity }) => ({
+            .map(({ user, peerId, activity, status }) => ({
                 id: user.id,
                 username: user.username,
                 avatar: user.avatar,
                 peerId,
                 activity,
+                status,
             }));
     };
 
@@ -113,6 +133,7 @@ export function createPresenceRouter(
         sockets.delete(id);
         const removedUser = usersBySocket.delete(id);
         liveBySocket.delete(id);
+        statusBySocket.delete(id);
         if (removedUser) publish();
     };
 
@@ -152,6 +173,7 @@ export function createPresenceRouter(
                 if (timer) clearTimeout(timer);
                 authenticationTimers.delete(socket.id);
                 usersBySocket.set(socket.id, authenticatedUser);
+                statusBySocket.set(socket.id, message.status ?? "online");
                 socket.send(JSON.stringify({ type: "authenticated" }));
                 publish();
                 return;
@@ -163,6 +185,13 @@ export function createPresenceRouter(
             }
             if (message.type === "offline") {
                 if (liveBySocket.delete(socket.id)) publish();
+                return;
+            }
+            if (message.type === "status") {
+                if (statusBySocket.get(socket.id) !== message.status) {
+                    statusBySocket.set(socket.id, message.status);
+                    publish();
+                }
                 return;
             }
             if (!validPeerId(message.peerId)) {
