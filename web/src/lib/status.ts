@@ -31,17 +31,38 @@ export function getMediaError(error: unknown, source: CaptureSource = "screen"):
         };
     }
 
-    if (error instanceof TypeError) {
+    if (error instanceof TypeError && error.message === "Media capture requires a secure context") {
         return {
             title: "Navegador incompatível",
             message: "A captura de mídia precisa ser aberta em HTTPS ou em localhost.",
         };
     }
 
+    if (error instanceof TypeError && error.message === "Camera capture is not supported") {
+        return {
+            title: "Câmera indisponível",
+            message: "Este navegador não permite usar a câmera.",
+        };
+    }
+
+    const detail = describeCaptureFailure(error);
     return {
         title: "Não foi possível iniciar",
-        message: "O navegador recusou a captura de mídia. Tente novamente.",
+        message: detail ?? "O navegador recusou a captura de mídia. Tente novamente.",
     };
+}
+
+function describeCaptureFailure(error: unknown): string | null {
+    if (error instanceof DOMException) {
+        return error.message ? `${error.message} (${error.name})` : error.name;
+    }
+    if (error instanceof Error) {
+        return error.message || null;
+    }
+    if (typeof error === "string") {
+        return error.trim() || null;
+    }
+    return null;
 }
 
 export function getPeerError(error: unknown): AppError {

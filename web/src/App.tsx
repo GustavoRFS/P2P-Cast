@@ -35,8 +35,9 @@ import {
     type ChatMessage,
 } from "./lib/chat";
 import { createChatNotificationPlayer, type ChatNotificationPlayer } from "./lib/chat-sound";
-import { captureDesktopWindow, getDesktopConfig, isDesktopApp, listDesktopCaptureTargets, listDesktopWindows, releaseDesktopCapture, resolveDesktopCaptureTarget, type DesktopConfig, type DesktopWindow } from "./lib/desktop";
+import { captureDesktopWindow, getDesktopConfig, isDesktopApp, listDesktopCaptureTargets, releaseDesktopCapture, resolveDesktopCaptureTarget, type DesktopConfig } from "./lib/desktop";
 import { ShortcutProfiles } from "./components/ShortcutProfiles";
+import { DiscordDrawer } from "./components/DiscordDrawer";
 import { loadShortcutProfiles, type ShortcutProfile } from "./lib/shortcut-profiles";
 import { useDesktopAccount, type DesktopAccount } from "./lib/desktop-account";
 import { createPeer, sendPeerLeave } from "./lib/peer";
@@ -44,6 +45,7 @@ import { createNegotiationStream, type NegotiationStream } from "./lib/receiver"
 import { buildWatchUrl, loadBroadcastId, parseWatchId, saveBroadcastId } from "./lib/room";
 import { createViewerSessionId, loadViewerId } from "./lib/viewer";
 import { getMediaError, getPeerError } from "./lib/status";
+import { recordCaptureFailure } from "./lib/capture-failure-log";
 import type { AppError, StreamMode } from "./types";
 
 const MAX_MEDIA_CONNECTIONS_PER_SESSION = 2;
@@ -111,7 +113,7 @@ function goHome() {
     window.location.href = window.location.pathname;
 }
 
-function AppHeader({ eyebrow = "P2P CAST", onHome }: { eyebrow?: string; onHome?: () => void }) {
+function AppHeader({ eyebrow = "P2P CAST", onHome, minimal = false }: { eyebrow?: string; onHome?: () => void; minimal?: boolean }) {
     return (
         <header className="app-header">
             <button className="brand-button" onClick={onHome ?? goHome} aria-label="Voltar para o início">
@@ -122,11 +124,13 @@ function AppHeader({ eyebrow = "P2P CAST", onHome }: { eyebrow?: string; onHome?
                 </span>
                 <span className="brand-name">p2p<span>cast</span></span>
             </button>
-            <div className="header-meta">
-                <span className="eyebrow">{eyebrow}</span>
-                <span className="header-dot" aria-hidden="true" />
-                <span className="header-note">sem servidor de vídeo</span>
-            </div>
+            {!minimal && (
+                <div className="header-meta">
+                    <span className="eyebrow">{eyebrow}</span>
+                    <span className="header-dot" aria-hidden="true" />
+                    <span className="header-note">sem servidor de vídeo</span>
+                </div>
+            )}
         </header>
     );
 }
@@ -173,42 +177,24 @@ function ErrorCard({
     );
 }
 
+/** Prefers the desktop bridge: the webview cannot write to the clipboard while unfocused. */
+async function writeClipboardText(text: string): Promise<void> {
+    const bridge = window.p2pcastDesktop;
+    if (bridge?.copyShareLink) {
+        await bridge.copyShareLink(text);
+        return;
+    }
+    await navigator.clipboard.writeText(text);
+}
+
 function HomeView({
     settings,
     onSettingsChange,
     onStart,
-    desktopMode,
-    desktopSources,
-    selectedDesktopSourceId,
-    onDesktopSourceChange,
-    onRefreshDesktopSources,
-    desktopSourcesLoading,
-    desktopConfigReady,
-    desktopAudioAvailable,
-    desktopCapturePicker,
-    desktopAccount,
-    captureTargets,
-    desktopHost,
-    directCaptureAvailable,
-    onShortcutProfilesChange,
 }: {
     settings: CaptureSettings;
     onSettingsChange: Dispatch<SetStateAction<CaptureSettings>>;
-    onStart: (settings: CaptureSettings, selectedDesktopSourceId?: string) => void;
-    desktopMode: boolean;
-    desktopSources: DesktopWindow[];
-    selectedDesktopSourceId: string;
-    onDesktopSourceChange: (sourceId: string) => void;
-    onRefreshDesktopSources: () => void;
-    desktopSourcesLoading: boolean;
-    desktopConfigReady: boolean;
-    desktopAudioAvailable: boolean;
-    desktopCapturePicker: "window-list" | "system-window";
-    desktopAccount: DesktopAccount | null;
-    captureTargets: DesktopCaptureTarget[];
-    desktopHost: "electron" | "tauri";
-    directCaptureAvailable: boolean;
-    onShortcutProfilesChange: (profiles: ShortcutProfile[]) => void;
+    onStart: (settings: CaptureSettings) => void;
 }) {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const settingsSummary = formatCaptureSettings(settings);
@@ -239,60 +225,6 @@ function HomeView({
                     Uma transmissão simples para explicar aquela jogada,
                     mostrar um bug ou acompanhar a partida com a galera.
                 </p>
-                {desktopMode && (
-                    <section className="desktop-window-picker" aria-label="Selecionar aplicativo para compartilhar">
-                        <div className="desktop-panel-heading">
-                            <div>
-                                <strong>Uma janela, uma transmissão</strong>
-                                <span>Somente o aplicativo escolhido será capturado.</span>
-                            </div>
-                            {desktopCapturePicker === "window-list" && (
-                                <button type="button" className="text-button" onClick={onRefreshDesktopSources}>
-                                    Atualizar
-                                </button>
-                            )}
-                        </div>
-                        {desktopCapturePicker === "system-window" ? (
-                            <p className="desktop-audio-note">Ao iniciar, escolha uma janela no seletor do sistema. A transmissão do Tauri inclui vídeo, sem áudio do aplicativo ou do sistema.</p>
-                        ) : (
-                            <>
-                                <label className="capture-setting desktop-window-select">
-                                    <span>Janela ou aplicativo</span>
-                                    <select
-                                        value={selectedDesktopSourceId}
-                                        onChange={event => onDesktopSourceChange(event.target.value)}
-                                        disabled={desktopSourcesLoading || desktopSources.length === 0}
-                                    >
-                                        {desktopSources.length === 0 && <option value="">{desktopSourcesLoading ? "Procurando janelas…" : "Nenhuma janela disponível"}</option>}
-                                        {desktopSources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
-                                    </select>
-                                </label>
-                                {selectedDesktopSourceId && desktopSources.find(source => source.id === selectedDesktopSourceId) && (
-                                    <div className="desktop-window-preview">
-                                        <img src={desktopSources.find(source => source.id === selectedDesktopSourceId)?.thumbnailDataUrl} alt="Prévia da janela selecionada" />
-                                        <span>{desktopSources.find(source => source.id === selectedDesktopSourceId)?.name}</span>
-                                    </div>
-                                )}
-                                {!desktopAudioAvailable && (
-                                    <p className="desktop-audio-note">Áudio isolado do aplicativo disponível no Windows com o capturador nativo instalado. O áudio global do sistema nunca é enviado.</p>
-                                )}
-                            </>
-                        )}
-                    </section>
-                )}
-                {desktopMode && (
-                    <ShortcutProfiles
-                        targets={captureTargets}
-                        host={desktopHost}
-                        directCaptureAvailable={directCaptureAvailable}
-                        settings={settings}
-                        onRefresh={onRefreshDesktopSources}
-                        onChange={onShortcutProfilesChange}
-                    />
-                )}
-                {desktopMode && desktopAccount && (
-                    <DesktopAccountPanel account={desktopAccount} />
-                )}
                 <div className="capture-settings">
                     <button
                         className="settings-toggle"
@@ -398,7 +330,7 @@ function HomeView({
                                     </select>
                                 </label>
                                 {settings.source !== "camera" && <label className="capture-setting">
-                                    <span>{desktopMode ? "Áudio do aplicativo escolhido" : "Áudio da tela"}</span>
+                                    <span>Áudio da tela</span>
                                     <select
                                         value={settings.audio ? "on" : "off"}
                                         onChange={event => onSettingsChange(current => ({
@@ -406,7 +338,7 @@ function HomeView({
                                             audio: event.target.value === "on",
                                         }))}
                                     >
-                                        <option value="on" disabled={desktopMode && !desktopAudioAvailable}>Ligado</option>
+                                        <option value="on">Ligado</option>
                                         <option value="off">Desligado</option>
                                     </select>
                                 </label>
@@ -449,15 +381,14 @@ function HomeView({
                 </div>
                 <button
                     className="button button-primary button-large"
-                    onClick={() => onStart(settings, selectedDesktopSourceId || undefined)}
-                    disabled={desktopMode && (!desktopConfigReady || (settings.source !== "camera" && !selectedDesktopSourceId))}
+                    onClick={() => onStart(settings)}
                 >
                     <span>Iniciar transmissão</span>
                     <span className="button-arrow" aria-hidden="true">↗</span>
                 </button>
                 <p className="microcopy">
                     <span aria-hidden="true">⌁</span>
-                    {desktopMode ? "login opcional · amigos ao vivo · vídeo P2P" : "sem upload · sem login · feito para poucos amigos"}
+                    sem upload · sem login · feito para poucos amigos
                 </p>
             </section>
 
@@ -516,42 +447,41 @@ function HomeView({
     );
 }
 
-function DesktopAccountPanel({ account }: { account: DesktopAccount }) {
+function DesktopHome({
+    account,
+    captureTargets,
+    host,
+    directCaptureAvailable,
+    settings,
+    onRefreshTargets,
+    onShortcutProfilesChange,
+}: {
+    account: DesktopAccount | null;
+    captureTargets: DesktopCaptureTarget[];
+    host: "electron" | "tauri";
+    directCaptureAvailable: boolean;
+    settings: CaptureSettings;
+    onRefreshTargets: () => void;
+    onShortcutProfilesChange: (profiles: ShortcutProfile[]) => void;
+}) {
+    const [drawerOpen, setDrawerOpen] = useState(true);
+
     return (
-        <section className="desktop-account-panel" aria-label="Conta Discord e amigos ao vivo">
-            <div className="desktop-panel-heading">
-                <div>
-                    <strong>{account.user ? `Conectado como ${account.user.username}` : "Amigos ao vivo"}</strong>
-                    <span>{account.user ? "Presença sincronizada com a sua lista" : "Entre no Discord para ver quem está transmitindo"}</span>
-                </div>
-                {account.user ? (
-                    <button type="button" className="text-button" onClick={() => void account.signOut()}>Sair</button>
-                ) : (
-                    <button type="button" className="button button-secondary button-small" onClick={() => void account.signIn()}>
-                        {account.loading ? "Carregando…" : "Entrar com Discord"}
-                    </button>
-                )}
-            </div>
-            {account.error && <p className="desktop-account-error" role="status">{account.error}</p>}
-            {!account.user ? (
-                <p className="desktop-account-empty">Login é opcional. Você pode transmitir sem entrar.</p>
-            ) : account.liveUsers.length === 0 ? (
-                <p className="desktop-account-empty">Ninguém da whitelist está ao vivo agora.</p>
-            ) : (
-                <div className="desktop-live-users">
-                    {account.liveUsers.map(user => (
-                        <button key={`${user.id}:${user.peerId}`} type="button" className="desktop-live-user" onClick={() => account.watch(user.peerId)}>
-                            {user.avatar ? <img src={user.avatar} alt="" /> : <span className="desktop-user-avatar" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>}
-                            <span className="desktop-live-user-copy">
-                                <strong>{user.username}</strong>
-                                <small>{user.activity || "Transmitindo agora"}</small>
-                            </span>
-                            <span className="desktop-live-dot" aria-label="Ao vivo" />
-                        </button>
-                    ))}
-                </div>
-            )}
-        </section>
+        <main className={drawerOpen ? "desktop-home has-drawer" : "desktop-home"}>
+            <ShortcutProfiles
+                targets={captureTargets}
+                host={host}
+                directCaptureAvailable={directCaptureAvailable}
+                settings={settings}
+                onRefresh={onRefreshTargets}
+                onChange={onShortcutProfilesChange}
+            />
+            <DiscordDrawer
+                account={account}
+                open={drawerOpen}
+                onToggle={() => setDrawerOpen(current => !current)}
+            />
+        </main>
     );
 }
 
@@ -842,11 +772,8 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     const [localStreams, setLocalStreams] = useState<CaptureStreams>(EMPTY_CAPTURE_STREAMS);
     const [captureSettings, setCaptureSettings] = useState<CaptureSettings>(loadCaptureSettings);
     const [desktopConfig, setDesktopConfig] = useState<DesktopConfig | null>(null);
-    const [desktopSources, setDesktopSources] = useState<DesktopWindow[]>([]);
     const [captureTargets, setCaptureTargets] = useState<DesktopCaptureTarget[]>([]);
     const [shortcutProfiles, setShortcutProfiles] = useState<ShortcutProfile[]>(loadShortcutProfiles);
-    const [selectedDesktopSourceId, setSelectedDesktopSourceId] = useState("");
-    const [desktopSourcesLoading, setDesktopSourcesLoading] = useState(desktopMode);
     const [shareUrl, setShareUrl] = useState<string | null>(null);
     const [viewerCount, setViewerCount] = useState(0);
     const [copied, setCopied] = useState(false);
@@ -871,18 +798,11 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
 
     const refreshDesktopSources = useCallback(async () => {
         if (!desktopMode) return;
-        setDesktopSourcesLoading(true);
         try {
-            const [sources, targets] = await Promise.all([listDesktopWindows(), listDesktopCaptureTargets()]);
-            setDesktopSources(sources);
-            setCaptureTargets(targets);
-            setSelectedDesktopSourceId(current => sources.some(source => source.id === current) ? current : sources[0]?.id ?? "");
+            setCaptureTargets(await listDesktopCaptureTargets());
         } catch {
-            setDesktopSources([]);
-            setSelectedDesktopSourceId("");
-            setError({ title: "Não foi possível listar as janelas", message: "Confira as permissões de captura de tela do sistema e atualize a lista." });
-        } finally {
-            setDesktopSourcesLoading(false);
+            setCaptureTargets([]);
+            setError({ title: "Não foi possível listar os programas", message: "Confira as permissões de captura de tela do sistema e atualize a lista." });
         }
     }, [desktopMode]);
 
@@ -980,7 +900,7 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
 
     const startBroadcast = useCallback(async (
         settings: CaptureSettings = captureSettings,
-        sourceId: string | undefined = selectedDesktopSourceId || undefined,
+        sourceId?: string,
         profile?: ShortcutProfile,
         audioSourceId?: string,
     ) => {
@@ -1007,6 +927,7 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
 
             if (sources.includes("screen")) {
                 if (desktopMode) {
+                    if (!profile) throw new Error("No desktop, a transmissão de tela começa pelo atalho configurado.");
                     if (!sourceId) throw new TypeError("Selecione uma janela ou aplicativo para transmitir.");
                     if (!desktopConfig) throw new Error("A configuração desktop ainda não está disponível.");
                     nextStreams.screen = await captureDesktopWindow(sourceId, settings, desktopConfig, {
@@ -1036,7 +957,9 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
             peer.on("open", id => {
                 saveBroadcastId(id);
                 const shareOrigin = desktopMode ? desktopConfig?.webUrl ?? window.location.origin : window.location.origin;
-                setShareUrl(buildWatchUrl(shareOrigin, desktopMode ? "/" : window.location.pathname, id));
+                const watchUrl = buildWatchUrl(shareOrigin, desktopMode ? "/" : window.location.pathname, id);
+                setShareUrl(watchUrl);
+                void writeClipboardText(watchUrl).then(() => setCopied(true)).catch(() => undefined);
                 setLivePeer?.(id);
                 setMode("broadcasting");
             });
@@ -1137,10 +1060,11 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
         } catch (captureError) {
             if (localStreamsRef.current !== nextStreams) stopCaptureStreams(nextStreams);
             stopBroadcast();
+            recordCaptureFailure("startBroadcast", captureError);
             setError(getMediaError(captureError, settings.source));
             setMode("error");
         }
-    }, [captureSettings, desktopConfig, desktopMode, selectedDesktopSourceId, setLivePeer, stopBroadcast, updateViewerCount]);
+    }, [captureSettings, desktopConfig, desktopMode, setLivePeer, stopBroadcast, updateViewerCount]);
 
     useEffect(() => {
         if (!desktopMode || !window.p2pcastDesktop?.registerShortcutProfiles) return;
@@ -1174,6 +1098,7 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
                 }
                 await startBroadcast(profile.settings, video.id, profile, audio.id);
             })().catch(captureError => {
+                recordCaptureFailure("shortcutProfile", captureError);
                 setError(getMediaError(captureError, "screen"));
                 setMode("error");
             });
@@ -1285,7 +1210,7 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
         if (!shareUrl) return;
 
         try {
-            await navigator.clipboard.writeText(shareUrl);
+            await writeClipboardText(shareUrl);
             setCopied(true);
         } catch {
             setError({
@@ -1298,31 +1223,29 @@ function BroadcastView({ desktopAccount }: { desktopAccount: DesktopAccount | nu
     if (mode === "idle" || mode === "error") {
         return (
             <div className={desktopMode ? "page-shell desktop-shell" : "page-shell"}>
-                <AppHeader />
-                <HomeView
-                    settings={captureSettings}
-                    onSettingsChange={setCaptureSettings}
-                    onStart={startBroadcast}
-                    desktopMode={desktopMode}
-                    desktopSources={desktopSources}
-                    selectedDesktopSourceId={selectedDesktopSourceId}
-                    onDesktopSourceChange={setSelectedDesktopSourceId}
-                    onRefreshDesktopSources={() => void refreshDesktopSources()}
-                    desktopSourcesLoading={desktopSourcesLoading}
-                    desktopConfigReady={!desktopMode || Boolean(desktopConfig)}
-                    desktopAudioAvailable={desktopConfig?.isolatedAudioAvailable ?? false}
-                    desktopCapturePicker={desktopConfig?.capturePicker ?? "window-list"}
-                    desktopAccount={desktopMode ? desktopAccount : null}
-                    captureTargets={captureTargets}
-                    desktopHost={desktopConfig?.host ?? "electron"}
-                    directCaptureAvailable={desktopConfig?.directVideoCaptureAvailable ?? false}
-                    onShortcutProfilesChange={setShortcutProfiles}
-                />
+                <AppHeader minimal={desktopMode} />
+                {desktopMode ? (
+                    <DesktopHome
+                        account={desktopAccount}
+                        captureTargets={captureTargets}
+                        host={desktopConfig?.host ?? "electron"}
+                        directCaptureAvailable={desktopConfig?.directVideoCaptureAvailable ?? false}
+                        settings={captureSettings}
+                        onRefreshTargets={() => void refreshDesktopSources()}
+                        onShortcutProfilesChange={setShortcutProfiles}
+                    />
+                ) : (
+                    <HomeView
+                        settings={captureSettings}
+                        onSettingsChange={setCaptureSettings}
+                        onStart={startBroadcast}
+                    />
+                )}
                 {error && (
                     <div className="floating-error">
                         <ErrorCard
                             error={error}
-                            onRetry={() => startBroadcast(captureSettings, selectedDesktopSourceId || undefined)}
+                            onRetry={desktopMode ? undefined : () => startBroadcast(captureSettings)}
                             onHome={goHome}
                         />
                     </div>

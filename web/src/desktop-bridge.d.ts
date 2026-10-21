@@ -66,6 +66,7 @@ declare global {
                 directVideoCaptureAvailable?: boolean;
                 capturePicker: "window-list" | "system-window";
             }>;
+            copyShareLink?(link: string): Promise<void>;
             loginWithDiscord(codeChallenge: string): Promise<void>;
             getSavedSession(): Promise<DesktopSavedSession | null>;
             saveSession(session: DesktopSavedSession): Promise<void>;

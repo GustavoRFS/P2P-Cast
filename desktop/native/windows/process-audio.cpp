@@ -2,10 +2,16 @@
 #define NOMINMAX
 
 #include <windows.h>
+#include <combaseapi.h>
+#include <objidl.h>
+#include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
 #include <ksmedia.h>
 #include <propvarutil.h>
+
+#include <fcntl.h>
+#include <io.h>
 
 #include <atomic>
 #include <cstdint>
@@ -14,9 +20,14 @@
 #include <new>
 #include <vector>
 
-class ActivationHandler final : public IActivateAudioInterfaceCompletionHandler {
+// ActivateAudioInterfaceAsync only accepts an agile handler: it must answer IAgileObject and
+// offer free-threaded marshaling, otherwise the activation fails with E_ILLEGAL_METHOD_CALL.
+class ActivationHandler final : public IActivateAudioInterfaceCompletionHandler, public IAgileObject {
 public:
-    explicit ActivationHandler(HANDLE finished) : finished_(finished) {}
+    explicit ActivationHandler(HANDLE finished) : finished_(finished) {
+        CoCreateFreeThreadedMarshaler(
+            static_cast<IActivateAudioInterfaceCompletionHandler*>(this), &marshaler_);
+    }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** result) override {
         if (!result) return E_POINTER;
@@ -24,6 +35,14 @@ public:
             *result = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
             AddRef();
             return S_OK;
+        }
+        if (iid == __uuidof(IAgileObject)) {
+            *result = static_cast<IAgileObject*>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (iid == __uuidof(IMarshal) && marshaler_) {
+            return marshaler_->QueryInterface(iid, result);
         }
         *result = nullptr;
         return E_NOINTERFACE;
@@ -56,10 +75,12 @@ public:
 
 private:
     ~ActivationHandler() {
+        if (marshaler_) marshaler_->Release();
         if (activated_) activated_->Release();
     }
 
     std::atomic<ULONG> refs_{1};
+    IUnknown* marshaler_ = nullptr;
     HANDLE finished_;
     HRESULT activationResult_ = E_PENDING;
     IUnknown* activated_ = nullptr;
@@ -79,6 +100,9 @@ static bool writeBytes(const void* bytes, size_t length) {
 }
 
 int main(int argc, char** argv) {
+    // The PCM stream must not be CRLF-translated: text mode turns every 0x0A sample byte into 0x0D 0x0A.
+    _setmode(_fileno(stdout), _O_BINARY);
+
     if (argc != 2) return fail("Expected a desktop window handle");
     char* end = nullptr;
     const unsigned long long rawHandle = std::strtoull(argv[1], &end, 0);

@@ -6,7 +6,12 @@ use std::{
 
 use keyring::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, WindowEvent,
+};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
@@ -126,6 +131,24 @@ fn normalized_origin(raw: &str, name: &str) -> Result<String, String> {
     Ok(parsed.origin().ascii_serialization())
 }
 
+/// Kills a helper process and folds whatever it wrote to stderr into the message, so the UI can
+/// show the real reason instead of a generic failure.
+pub(crate) fn helper_failure(child: &mut std::process::Child, message: &str) -> String {
+    use std::io::Read;
+
+    let _ = child.kill();
+    let mut detail = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = stderr.read_to_string(&mut detail);
+    }
+    let detail = detail.trim();
+    if detail.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message} ({detail})")
+    }
+}
+
 fn get_desktop_config(app: &AppHandle) -> Result<DesktopConfig, String> {
     let file = read_user_config(app)?;
     let backend_raw = environment_value("P2PCAST_BACKEND_URL")
@@ -133,7 +156,7 @@ fn get_desktop_config(app: &AppHandle) -> Result<DesktopConfig, String> {
         .unwrap_or_else(|| "http://localhost:3001".to_string());
     let web_raw = environment_value("P2PCAST_WEB_URL")
         .or(file.web_url)
-        .unwrap_or_else(|| "http://localhost:5173".to_string());
+        .unwrap_or_else(|| "https://live.ligmacharl.es".to_string());
 
     Ok(DesktopConfig {
         backend_url: normalized_origin(&backend_raw, "backendUrl")?,
@@ -396,13 +419,68 @@ async fn open_discord_login(app: AppHandle, code_challenge: String) -> Result<()
         .map_err(|error| format!("Could not open Discord login: {error}"))
 }
 
+/// Puts the freshly started broadcast link on the clipboard. This runs in Rust because the webview
+/// cannot write to the clipboard when the live starts from a global shortcut: the document is not
+/// focused, and Chromium rejects the write.
+#[tauri::command]
+fn copy_share_link(app: AppHandle, link: String) -> Result<(), String> {
+    if link.len() > 2048 {
+        return Err("The broadcast link is too long to copy.".to_string());
+    }
+    let parsed = Url::parse(&link).map_err(|error| format!("Invalid broadcast link: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Only http(s) broadcast links can be copied.".to_string());
+    }
+    app.clipboard()
+        .write_text(link)
+        .map_err(|error| format!("Could not copy the broadcast link: {error}"))
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Mostrar P2P-Cast", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("P2P-Cast")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -427,10 +505,20 @@ pub fn run() {
             save_login_verifier,
             clear_login_verifier,
             open_discord_login,
+            copy_share_link,
         ])
+        .on_window_event(|window, event| {
+            // Closing the window would end the process and unregister the shortcuts; keep the app
+            // in the tray instead, and quit only from the tray menu.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;
+            build_tray(app.handle())?;
             Ok(())
         })
         .run(tauri::generate_context!())

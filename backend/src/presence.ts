@@ -9,6 +9,13 @@ type LiveRecord = {
     updatedAt: number;
 };
 
+type PresenceRecord = {
+    user: DiscordProfile;
+    peerId: string | null;
+    activity: string | null;
+    updatedAt: number;
+};
+
 type PresenceSocket = {
     id: string;
     data: { headers: Record<string, string | undefined> };
@@ -65,11 +72,22 @@ export function createPresenceRouter(
     const liveBySocket = new Map<string, LiveRecord>();
     const authenticationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+    // Everyone authenticated has the app open, tray included; peerId is null until they go live.
     const currentUsers = () => {
-        const unique = new Map<string, LiveRecord>();
-        for (const record of liveBySocket.values()) {
-            const current = unique.get(record.user.id);
-            if (!current || current.updatedAt < record.updatedAt) unique.set(record.user.id, record);
+        const unique = new Map<string, PresenceRecord>();
+        for (const [socketId, user] of usersBySocket) {
+            const live = liveBySocket.get(socketId);
+            const record: PresenceRecord = {
+                user,
+                peerId: live?.peerId ?? null,
+                activity: live?.activity ?? null,
+                updatedAt: live?.updatedAt ?? 0,
+            };
+            const current = unique.get(user.id);
+            // One user can have several sockets: a live one wins, then the most recent.
+            if (!current || (record.peerId !== null && (current.peerId === null || current.updatedAt < record.updatedAt))) {
+                unique.set(user.id, record);
+            }
         }
 
         return [...unique.values()]
@@ -93,9 +111,9 @@ export function createPresenceRouter(
         if (timer) clearTimeout(timer);
         authenticationTimers.delete(id);
         sockets.delete(id);
-        usersBySocket.delete(id);
-        const removedLive = liveBySocket.delete(id);
-        if (removedLive) publish();
+        const removedUser = usersBySocket.delete(id);
+        liveBySocket.delete(id);
+        if (removedUser) publish();
     };
 
     const router = new Elysia().ws("/api/presence", {
@@ -135,7 +153,7 @@ export function createPresenceRouter(
                 authenticationTimers.delete(socket.id);
                 usersBySocket.set(socket.id, authenticatedUser);
                 socket.send(JSON.stringify({ type: "authenticated" }));
-                socket.send(JSON.stringify({ type: "presence", users: currentUsers() }));
+                publish();
                 return;
             }
 

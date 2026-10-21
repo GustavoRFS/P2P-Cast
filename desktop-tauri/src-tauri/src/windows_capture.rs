@@ -132,7 +132,7 @@ pub fn start(
         .arg(cursor)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start Windows Graphics Capture: {error}"))?;
     let Some(stdout) = child.stdout.take() else {
@@ -146,17 +146,17 @@ pub fn start(
     let mut stdout = BufReader::new(stdout);
     let mut handshake = Vec::new();
     if let Err(error) = stdout.read_until(b'\n', &mut handshake) {
-        let _ = child.kill();
-        return Err(format!(
-            "Could not initialize the Windows capture helper: {error}"
+        return Err(crate::helper_failure(
+            &mut child,
+            &format!("Could not initialize the Windows capture helper: {error}"),
         ));
     }
     let descriptor: HelperDescriptor = match serde_json::from_slice(&handshake) {
         Ok(value) => value,
         Err(error) => {
-            let _ = child.kill();
-            return Err(format!(
-                "Windows capture helper did not initialize: {error}"
+            return Err(crate::helper_failure(
+                &mut child,
+                &format!("Windows capture helper did not initialize: {error}"),
             ));
         }
     };
@@ -170,10 +170,10 @@ pub fn start(
             .map_or(true, |length| length > MAX_FRAME_BYTES)
         || descriptor.format != "rgba8"
     {
-        let _ = child.kill();
-        return Err(
-            "Windows capture helper returned unsupported video dimensions or format.".to_string(),
-        );
+        return Err(crate::helper_failure(
+            &mut child,
+            "Windows capture helper returned unsupported video dimensions or format.",
+        ));
     }
 
     let capture_id = format!(

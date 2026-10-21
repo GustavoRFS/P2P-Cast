@@ -1,5 +1,12 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
-import type { CaptureSettings } from "../lib/capture";
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+    BITRATE_OPTIONS,
+    CURSOR_OPTIONS,
+    FPS_OPTIONS,
+    RESOLUTION_OPTIONS,
+    formatCaptureSettings,
+    type CaptureSettings,
+} from "../lib/capture";
 import {
     loadShortcutProfiles,
     saveShortcutProfiles,
@@ -24,19 +31,27 @@ export function ShortcutProfiles({
     onChange: (profiles: ShortcutProfile[]) => void;
 }) {
     const [profiles, setProfiles] = useState(loadShortcutProfiles);
+    const [formOpen, setFormOpen] = useState(false);
     const [name, setName] = useState("");
     const [targetId, setTargetId] = useState("");
-    const [audioId, setAudioId] = useState("");
     const [shortcut, setShortcut] = useState("");
-    const [method, setMethod] = useState<ShortcutProfile["captureMethod"]>(host === "tauri" ? "windows-picker" : "direct");
+    const [draft, setDraft] = useState<CaptureSettings>(settings);
     const [message, setMessage] = useState("");
 
     useEffect(() => {
         setTargetId(current => targets.some(target => target.id === current) ? current : targets[0]?.id ?? "");
-        setAudioId(current => targets.some(target => target.id === current && target.kind === "window")
-            ? current
-            : targets.find(target => target.kind === "window")?.id ?? "");
     }, [targets]);
+
+    useEffect(() => {
+        if (!formOpen) return;
+
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setFormOpen(false);
+        };
+
+        document.addEventListener("keydown", closeOnEscape);
+        return () => document.removeEventListener("keydown", closeOnEscape);
+    }, [formOpen]);
 
     const persist = (next: ShortcutProfile[]) => {
         if (!saveShortcutProfiles(next)) {
@@ -48,9 +63,15 @@ export function ShortcutProfiles({
         setMessage("");
     };
 
+    const openForm = () => {
+        setDraft(settings);
+        setMessage("");
+        setFormOpen(true);
+        onRefresh();
+    };
+
     const selectedTarget = targets.find(target => target.id === targetId);
-    const windowTargets = targets.filter(target => target.kind === "window");
-    const recordShortcut = (event: KeyboardEvent<HTMLInputElement>) => {
+    const recordShortcut = (event: ReactKeyboardEvent<HTMLInputElement>) => {
         if (!event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) return;
         if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return;
         event.preventDefault();
@@ -63,52 +84,164 @@ export function ShortcutProfiles({
             key,
         ].join("+"));
     };
+
     const save = () => {
-        if (!name.trim() || !selectedTarget || !audioId || !shortcut.trim()) {
-            setMessage("Informe nome, alvo de vídeo, programa de áudio e atalho.");
+        if (!name.trim() || !selectedTarget || !shortcut.trim()) {
+            setMessage("Informe nome, programa e atalho.");
+            return;
+        }
+        if (selectedTarget.kind !== "window") {
+            setMessage("O áudio isolado precisa de uma janela de programa; um monitor inteiro não tem áudio próprio.");
             return;
         }
         const profile: ShortcutProfile = {
             id: crypto.randomUUID(),
             name: name.trim(),
             videoTarget: { kind: selectedTarget.kind, selector: selectedTarget.selector },
-            captureMethod: method,
-            audioSourceSelector: targets.find(target => target.id === audioId)?.selector ?? "",
+            captureMethod: "direct",
+            audioSourceSelector: selectedTarget.selector,
             shortcut: shortcut.trim().replace(/\s/g, ""),
-            settings: { ...settings, source: "screen", audio: true },
+            // The shortcut carries its own copy of the transmission settings.
+            settings: { ...draft, source: "screen", audio: true },
         };
         persist([...profiles, profile]);
         setName("");
         setShortcut("");
+        setFormOpen(false);
     };
 
     return (
         <section className="shortcut-profiles" aria-label="Atalhos de transmissão">
-            <div className="desktop-panel-heading">
-                <div><strong>Atalhos de transmissão</strong><span>Inicie uma captura com vídeo e áudio deste programa.</span></div>
-                <button type="button" className="text-button" onClick={onRefresh}>Atualizar programas</button>
-            </div>
-            {profiles.length > 0 && <ul className="shortcut-profile-list">
-                {profiles.map(profile => <li key={profile.id}>
-                    <span><strong>{profile.name}</strong><small>{profile.shortcut} · {profile.videoTarget.kind === "monitor" ? "tela inteira" : "janela"}</small></span>
-                    <button type="button" className="text-button" onClick={() => persist(profiles.filter(item => item.id !== profile.id))}>Remover</button>
-                </li>)}
-            </ul>}
-            <label className="capture-setting"><span>Nome do atalho</span><input value={name} maxLength={80} onChange={event => setName(event.target.value)} placeholder="CS2" /></label>
-            <label className="capture-setting"><span>Vídeo</span><select value={targetId} onChange={event => setTargetId(event.target.value)}>
-                {targets.length === 0 && <option value="">Nenhum programa detectado</option>}
-                {targets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
-            </select></label>
-            {host === "tauri" && <label className="capture-setting"><span>Método de captura</span><select value={method} onChange={event => setMethod(event.target.value as ShortcutProfile["captureMethod"])}>
-                <option value="direct" disabled={!directCaptureAvailable}>{directCaptureAvailable ? "Captura direta" : "Captura direta (helper indisponível)"}</option><option value="windows-picker">Seletor do Windows</option>
-            </select></label>}
-            {host === "tauri" && <p className="desktop-audio-note">{method === "windows-picker" ? "O seletor do Windows pede que você escolha a janela ou o monitor a cada início; o alvo de vídeo salvo não pode ser imposto pelo seletor." : "A captura direta abre o alvo salvo sem mostrar o seletor do Windows."}</p>}
-            <label className="capture-setting"><span>Áudio do programa</span><select value={audioId} onChange={event => setAudioId(event.target.value)}>
-                {windowTargets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
-            </select></label>
-            <label className="capture-setting"><span>Atalho (pressione a combinação)</span><input value={shortcut} onKeyDown={recordShortcut} onChange={event => setShortcut(event.target.value)} placeholder="Ctrl+Shift+F9" /></label>
-            <button type="button" className="primary-button" onClick={save}>Salvar atalho</button>
-            {message && <p className="desktop-audio-note" role="status">{message}</p>}
+            {profiles.length > 0 ? (
+                <ul className="shortcut-profile-list">
+                    {profiles.map(profile => <li key={profile.id}>
+                        <span>
+                            <strong>{profile.name}</strong>
+                            <small>{profile.shortcut} · {profile.videoTarget.kind === "monitor" ? "tela inteira" : "janela"}</small>
+                            <small>{formatCaptureSettings(profile.settings)}</small>
+                        </span>
+                        <button type="button" className="text-button" onClick={() => persist(profiles.filter(item => item.id !== profile.id))}>Remover</button>
+                    </li>)}
+                </ul>
+            ) : (
+                <p className="shortcut-empty">Nenhum atalho ainda. Crie um para transmitir um programa com uma combinação de teclas.</p>
+            )}
+
+            <button type="button" className="button button-primary" onClick={openForm}>
+                + Atalhos de Transmissão
+            </button>
+
+            {host === "tauri" && !directCaptureAvailable && (
+                <p className="desktop-audio-note">A captura direta está indisponível: compile o helper nativo do Windows antes de usar os atalhos.</p>
+            )}
+            {message && !formOpen && <p className="desktop-audio-note" role="status">{message}</p>}
+
+            {formOpen && (
+                <div className="modal-backdrop" role="presentation" onClick={() => setFormOpen(false)}>
+                    <div
+                        className="modal-card"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="shortcut-form-title"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <div className="capture-settings-heading">
+                            <div>
+                                <strong id="shortcut-form-title">Novo atalho de transmissão</strong>
+                                <span>Vídeo e áudio do programa escolhido, com estas configurações</span>
+                            </div>
+                            <button
+                                className="settings-close"
+                                type="button"
+                                onClick={() => setFormOpen(false)}
+                                aria-label="Fechar"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="capture-settings-fields">
+                            <label className="capture-setting">
+                                <span>Nome do atalho</span>
+                                <input value={name} maxLength={80} onChange={event => setName(event.target.value)} placeholder="CS2" />
+                            </label>
+                            <label className="capture-setting">
+                                <span>Atalho (pressione a combinação)</span>
+                                <input value={shortcut} onKeyDown={recordShortcut} onChange={event => setShortcut(event.target.value)} placeholder="Ctrl+Shift+F9" />
+                            </label>
+                            <label className="capture-setting capture-setting-wide">
+                                <span>Programa (vídeo e áudio)</span>
+                                <select value={targetId} onChange={event => setTargetId(event.target.value)}>
+                                    {targets.length === 0 && <option value="">Nenhum programa detectado</option>}
+                                    {targets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
+                                </select>
+                            </label>
+                            <label className="capture-setting">
+                                <span>Resolução</span>
+                                <select
+                                    value={draft.resolution}
+                                    onChange={event => setDraft(current => ({ ...current, resolution: event.target.value as CaptureSettings["resolution"] }))}
+                                >
+                                    {RESOLUTION_OPTIONS.map(option => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="capture-setting">
+                                <span>FPS</span>
+                                <select
+                                    value={draft.fps}
+                                    onChange={event => setDraft(current => ({ ...current, fps: Number(event.target.value) as CaptureSettings["fps"] }))}
+                                >
+                                    {FPS_OPTIONS.map(fps => <option key={fps} value={fps}>{fps} FPS</option>)}
+                                </select>
+                            </label>
+                            <label className="capture-setting">
+                                <span>Bitrate</span>
+                                <select
+                                    value={draft.bitrate === null ? "auto" : String(draft.bitrate)}
+                                    onChange={event => setDraft(current => ({
+                                        ...current,
+                                        bitrate: event.target.value === "auto" ? null : Number(event.target.value) as CaptureSettings["bitrate"],
+                                    }))}
+                                >
+                                    {BITRATE_OPTIONS.map(option => (
+                                        <option key={option.label} value={option.value === null ? "auto" : String(option.value)}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="capture-setting">
+                                <span>Cursor</span>
+                                <select
+                                    value={draft.cursor}
+                                    onChange={event => setDraft(current => ({ ...current, cursor: event.target.value as CaptureSettings["cursor"] }))}
+                                >
+                                    {CURSOR_OPTIONS.map(option => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="capture-setting">
+                                <span>Microfone</span>
+                                <select
+                                    value={draft.microphone ? "on" : "off"}
+                                    onChange={event => setDraft(current => ({ ...current, microphone: event.target.value === "on" }))}
+                                >
+                                    <option value="on">Ligado</option>
+                                    <option value="off">Desligado</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        {message && <p className="desktop-audio-note" role="status">{message}</p>}
+
+                        <div className="modal-actions">
+                            <button type="button" className="text-button" onClick={() => setFormOpen(false)}>Cancelar</button>
+                            <button type="button" className="button button-primary" onClick={save}>Salvar atalho</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

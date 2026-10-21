@@ -113,7 +113,7 @@ pub fn start(
         .arg(format!("0x{raw_handle}"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start isolated application audio: {error}"))?;
     let mut child = child;
@@ -126,29 +126,35 @@ pub fn start(
     let header_bytes = match reader.read_until(b'\n', &mut header) {
         Ok(bytes) => bytes,
         Err(error) => {
-            let _ = child.kill();
-            return Err(format!("Could not read the audio helper format: {error}"));
+            return Err(crate::helper_failure(
+                &mut child,
+                &format!("Could not read the audio helper format: {error}"),
+            ));
         }
     };
     if header_bytes == 0 {
-        let _ = child.kill();
-        return Err(
-            "The isolated-audio helper failed before opening the audio device.".to_string(),
-        );
+        return Err(crate::helper_failure(
+            &mut child,
+            "The isolated-audio helper failed before opening the audio device.",
+        ));
     }
     let format: serde_json::Value = match serde_json::from_slice(&header) {
         Ok(format) => format,
         Err(error) => {
-            let _ = child.kill();
-            return Err(format!("Invalid audio helper format: {error}"));
+            return Err(crate::helper_failure(
+                &mut child,
+                &format!("Invalid audio helper format: {error}"),
+            ));
         }
     };
     if format.get("sampleRate").and_then(|v| v.as_u64()) != Some(48_000)
         || format.get("channels").and_then(|v| v.as_u64()) != Some(2)
         || format.get("format").and_then(|v| v.as_str()) != Some("f32le")
     {
-        let _ = child.kill();
-        return Err("The audio helper returned an unsupported audio format.".to_string());
+        return Err(crate::helper_failure(
+            &mut child,
+            "The audio helper returned an unsupported audio format.",
+        ));
     }
 
     let capture_id = format!(

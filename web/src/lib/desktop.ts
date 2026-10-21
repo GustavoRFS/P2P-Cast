@@ -96,8 +96,12 @@ export async function captureDesktopWindow(
         const [initialWidth, initialHeight] = resolvedCanvasSize(started.width, started.height, settings.resolution);
         outputCanvas.width = initialWidth;
         outputCanvas.height = initialHeight;
-        const outputStream = outputCanvas.captureStream(settings.fps);
+        // captureStream(0) only emits on requestFrame, so the track carries the frames WGC actually
+        // delivered instead of resampling them into duplicates at the requested rate.
+        const outputStream = outputCanvas.captureStream(0);
+        const outputTrack = outputStream.getVideoTracks()[0] as (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
         videoStream = outputStream;
+        let frameImage: ImageData | null = null;
         removeDirectFrameListener = desktop.onDirectVideoFrame(started.captureId, frame => {
             if (frame.buffer.byteLength !== frame.width * frame.height * 4) return;
             if (sourceCanvas.width !== frame.width || sourceCanvas.height !== frame.height) {
@@ -109,8 +113,14 @@ export async function captureDesktopWindow(
                 outputCanvas.width = width;
                 outputCanvas.height = height;
             }
-            sourceContext.putImageData(new ImageData(new Uint8ClampedArray(frame.buffer), frame.width, frame.height), 0, 0);
+            // Reusing one ImageData avoids allocating a full frame (8 MB at 1080p) on every tick.
+            if (!frameImage || frameImage.width !== frame.width || frameImage.height !== frame.height) {
+                frameImage = new ImageData(frame.width, frame.height);
+            }
+            frameImage.data.set(new Uint8Array(frame.buffer));
+            sourceContext.putImageData(frameImage, 0, 0);
             outputContext.drawImage(sourceCanvas, 0, 0, width, height);
+            outputTrack?.requestFrame?.();
         });
         removeDirectErrorListener = desktop.onDirectVideoError(started.captureId, message => {
             window.dispatchEvent(new CustomEvent("p2pcast:direct-video-error", { detail: message }));

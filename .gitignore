@@ -6,3 +6,4 @@ node_modules
 .worktrees/
 desktop-tauri/config.json
 desktop-tauri/src-tauri/target/
+desktop-tauri/src-tauri/gen/

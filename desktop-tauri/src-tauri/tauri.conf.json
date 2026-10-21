@@ -18,7 +18,8 @@
         "height": 820,
         "minWidth": 780,
         "minHeight": 620,
-        "backgroundColor": "#07111f"
+        "backgroundColor": "#07111f",
+        "visible": false
       }
     ],
     "security": {
@@ -36,13 +37,24 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
       }
-    }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["p2pcast-tauri"]
+        "schemes": [
+          "p2pcast-tauri"
+        ]
       }
     }
   }

@@ -7,10 +7,13 @@ export type DiscordProfile = {
     avatar: string | null;
 };
 
-export type DesktopLiveUser = DiscordProfile & {
-    peerId: string;
+/** Someone with the app open; peerId is set only while they are broadcasting. */
+export type DesktopPresenceUser = DiscordProfile & {
+    peerId: string | null;
     activity: string | null;
 };
+
+export type DesktopLiveUser = DesktopPresenceUser & { peerId: string };
 
 type SavedSession = {
     token: string;
@@ -24,7 +27,7 @@ type PresenceFrame = {
 
 export type DesktopAccount = {
     user: DiscordProfile | null;
-    liveUsers: DesktopLiveUser[];
+    onlineUsers: DesktopPresenceUser[];
     liveNotifications: DesktopLiveUser[];
     error: string | null;
     loading: boolean;
@@ -52,16 +55,16 @@ function decodeProfile(value: unknown): DiscordProfile | null {
     };
 }
 
-function decodeLiveUsers(value: unknown): DesktopLiveUser[] {
+function decodePresenceUsers(value: unknown): DesktopPresenceUser[] {
     if (!Array.isArray(value)) return [];
     return value.flatMap(item => {
         if (typeof item !== "object" || item === null) return [];
-        const row = item as Partial<DesktopLiveUser>;
+        const row = item as Partial<DesktopPresenceUser>;
         const user = decodeProfile(row);
-        if (!user || typeof row.peerId !== "string") return [];
+        if (!user) return [];
         return [{
             ...user,
-            peerId: row.peerId,
+            peerId: typeof row.peerId === "string" ? row.peerId : null,
             activity: typeof row.activity === "string" ? row.activity : null,
         }];
     });
@@ -84,7 +87,7 @@ export function useDesktopAccount(): DesktopAccount {
     const desktopMode = isDesktopApp();
     const [config, setConfig] = useState<DesktopConfig | null>(null);
     const [session, setSession] = useState<SavedSession | null>(null);
-    const [liveUsers, setLiveUsers] = useState<DesktopLiveUser[]>([]);
+    const [onlineUsers, setOnlineUsers] = useState<DesktopPresenceUser[]>([]);
     const [liveNotifications, setLiveNotifications] = useState<DesktopLiveUser[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(desktopMode);
@@ -187,7 +190,7 @@ export function useDesktopAccount(): DesktopAccount {
         if (!desktop || !config || !session) {
             socketRef.current?.close();
             socketRef.current = null;
-            setLiveUsers([]);
+            setOnlineUsers([]);
             setLiveNotifications([]);
             return;
         }
@@ -221,9 +224,11 @@ export function useDesktopAccount(): DesktopAccount {
                         return;
                     }
                     if (frame.type === "presence") {
-                        const users = decodeLiveUsers(frame.users);
+                        const users = decodePresenceUsers(frame.users);
+                        // Opening the app is not an event; only a started broadcast notifies.
+                        const live = users.filter((user): user is DesktopLiveUser => user.peerId !== null);
                         if (previousLiveUserIds) {
-                            const newlyLive = users.filter(user =>
+                            const newlyLive = live.filter(user =>
                                 !previousLiveUserIds!.has(user.id) && user.id !== session.user.id,
                             );
                             for (const user of newlyLive) {
@@ -239,8 +244,8 @@ export function useDesktopAccount(): DesktopAccount {
                                 }
                             }
                         }
-                        previousLiveUserIds = new Set(users.map(user => user.id));
-                        setLiveUsers(users);
+                        previousLiveUserIds = new Set(live.map(user => user.id));
+                        setOnlineUsers(users);
                     }
                 } catch {
                     setError("O backend retornou uma atualização de presença inválida.");
@@ -294,7 +299,7 @@ export function useDesktopAccount(): DesktopAccount {
         socket?.close();
         socketRef.current = null;
         pendingVerifierRef.current = null;
-        setLiveUsers([]);
+        setOnlineUsers([]);
         setSession(null);
         if (currentConfig && currentSession) {
             void fetch(new URL("/api/logout", currentConfig.backendUrl), {
@@ -330,7 +335,7 @@ export function useDesktopAccount(): DesktopAccount {
 
     return {
         user: session?.user ?? null,
-        liveUsers,
+        onlineUsers,
         liveNotifications,
         error,
         loading,

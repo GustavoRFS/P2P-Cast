@@ -1,9 +1,10 @@
 use crate::DesktopCaptureTarget;
 use std::{mem::size_of, ptr::null_mut};
+use windows_sys::core::BOOL;
 use windows_sys::Win32::{
-    Foundation::{BOOL, HWND, LPARAM, TRUE},
+    Foundation::{HWND, LPARAM, RECT, TRUE},
     Graphics::Gdi::{
-        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, RECT,
+        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
     },
     System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,

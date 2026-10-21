@@ -142,6 +142,7 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
                 appOrigin: window.location.origin,
             };
         },
+        copyShareLink: (link: string) => invoke<void>("copy_share_link", { link }),
         loginWithDiscord: async (codeChallenge: string) => {
             if (!/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) throw new TypeError("Invalid login challenge");
             await invoke("open_discord_login", { codeChallenge });
