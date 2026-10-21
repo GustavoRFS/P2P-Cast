@@ -116,8 +116,10 @@ if (flag("--eas")) {
             if (!existsSync(join(cmakeDir, "bin", "ninja.exe"))) fail(`no long-path CMake at ${cmakeDir} (see the header of this script)`);
             writeFileSync(join(androidDir, "local.properties"), `cmake.dir=${cmakeDir.replace(/\\/g, "/")}\n`);
         }
-        // arm64-v8a covers current phones and keeps the build within this machine's memory.
-        step(`${process.platform === "win32" ? "gradlew.bat" : "./gradlew"} assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon`, { cwd: androidDir });
+        // arm64-v8a covers current phones and keeps the build within this machine's memory. The full
+        // path matters: cmd skips the current directory when NoDefaultCurrentDirectoryInExePath is set.
+        const gradlew = join(androidDir, process.platform === "win32" ? "gradlew.bat" : "gradlew");
+        step(`"${gradlew}" assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon`, { cwd: androidDir });
     }
     const outputDir = join(androidDir, "app", "build", "outputs", "apk", "release");
     const built = existsSync(outputDir) ? readdirSync(outputDir).find(name => name.endsWith(".apk")) : undefined;
