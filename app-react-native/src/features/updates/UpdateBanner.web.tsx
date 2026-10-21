@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
+import { loadToastCorner } from "../../lib/presence-prefs";
 import { useBroadcast } from "../session/BroadcastProvider";
 import { UpdatePrompt } from "./UpdatePrompt";
 
 /**
- * Desktop (Tauri) updates: Rust checks the signed update feed, downloads the installer and tells
- * this page when it is ready. Installing closes the app; the installer reopens it. The public web
- * page has no bridge and never shows this.
+ * Desktop (Tauri) updates: Rust checks the signed update feed (at startup and from the tray),
+ * downloads the installer and tells this page when one has to wait. Installing closes the app; the
+ * installer reopens it. Answers to the tray's "Verificar atualizações" go to the toast window, in
+ * the corner chosen for live notifications. The public web page has no bridge and never shows this.
  */
 export function UpdateBanner() {
     const desktop = typeof window !== "undefined" ? window.p2pcastDesktop : undefined;
@@ -19,7 +21,22 @@ export function UpdateBanner() {
         if (!desktop?.getReadyUpdate) return;
         // The update may have been downloaded before this page started listening.
         void desktop.getReadyUpdate().then(ready => ready && setUpdate(ready)).catch(() => undefined);
-        return desktop.onUpdateReady?.(setUpdate);
+        const stopReady = desktop.onUpdateReady?.(setUpdate);
+        const stopNotice = desktop.onUpdateNotice?.(notice => {
+            void desktop.showLiveToast?.({
+                id: Date.now(),
+                userId: "p2p-cast",
+                username: notice.title,
+                avatar: null,
+                peerId: "update",
+                corner: loadToastCorner(),
+                message: notice.message,
+            }).catch(error => console.error("Could not show the update notice:", error));
+        });
+        return () => {
+            stopReady?.();
+            stopNotice?.();
+        };
     }, [desktop]);
 
     if (!update || dismissed === update.version || !desktop?.installUpdate) return null;

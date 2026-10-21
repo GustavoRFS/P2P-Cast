@@ -109,7 +109,7 @@ Antes de empacotar no Windows, compile os dois helpers nativos em `desktop/` com
 
 ### Atualizações do desktop
 
-O app instalado se atualiza sozinho pelo `tauri-plugin-updater`: ao abrir e a cada 6 horas ele lê `https://github.com/GustavoRFS/P2P-Cast/releases/latest/download/latest.json`, baixa o instalador, confere a assinatura e só instala sem transmissão em andamento (logo ao iniciar no tray, ou pelo botão "Atualizar" no app e no menu do tray). O instalador NSIS roda em modo passivo e reabre o app.
+O app instalado se atualiza pelo `tauri-plugin-updater`, só em dois momentos: ao iniciar e pelo item "Verificar atualizações" do tray. Ele lê `https://github.com/GustavoRFS/P2P-Cast/releases/latest/download/latest.json`, baixa o instalador, confere a assinatura e nunca instala durante uma transmissão. Ao iniciar, instala se o app estiver parado no tray; pelo tray, instala na hora. O que precisar esperar aparece como "Atualizar para a X" no app e no tray, e as respostas da verificação manual aparecem no canto escolhido para os avisos de live. O instalador NSIS roda em modo passivo e reabre o app.
 
 Para publicar uma versão, suba o `version` em `desktop-tauri/src-tauri/tauri.conf.json`, faça commit e push, e rode `npm run release -- --notes "O que mudou"` dentro de `desktop-tauri/` (com `--draft` para revisar antes). O script gera o instalador assinado, monta o `latest.json` e cria a release `desktop-v<versão>` marcada como latest, que é a que o feed resolve. A chave privada fica em `~/.tauri/p2p-cast-updater.key` (ou em `TAURI_SIGNING_PRIVATE_KEY`) e deve ter backup: sem ela, os apps instalados não aceitam mais atualizações. A chave pública está em `plugins.updater.pubkey`.
 

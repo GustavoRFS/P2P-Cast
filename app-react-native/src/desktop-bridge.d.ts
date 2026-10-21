@@ -64,6 +64,14 @@ declare global {
         corner: "top-right" | "bottom-right" | "top-left" | "bottom-left";
         /** From "Prever notificação": a click only dismisses it. */
         preview?: boolean;
+        /** An app message (updates) instead of a live: `username` is the title, shown with the app icon. */
+        message?: string;
+    }
+
+    /** What the updater reports after "Verificar atualizações" in the tray. */
+    interface DesktopUpdateNotice {
+        title: string;
+        message: string;
     }
 
     interface Window {
@@ -89,6 +97,7 @@ declare global {
             /** Closes the app; the installer reopens it on the new version. */
             installUpdate?(): Promise<void>;
             onUpdateReady?(listener: (update: DesktopUpdate) => void): () => void;
+            onUpdateNotice?(listener: (notice: DesktopUpdateNotice) => void): () => void;
             loginWithDiscord(codeChallenge: string): Promise<void>;
             getSavedSession(): Promise<DesktopSavedSession | null>;
             saveSession(session: DesktopSavedSession): Promise<void>;

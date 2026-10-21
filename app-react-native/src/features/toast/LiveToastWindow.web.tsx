@@ -5,11 +5,31 @@ import { Image, Pressable, Text, View } from "react-native";
 
 const VISIBLE_MS = 6000;
 const SLIDE_MS = 300;
+const APP_ICON = require("../../../assets/images/icon.png");
+
+/** The broadcaster's picture (or initial) with the red live badge. */
+function LiveAvatar({ toast }: { toast: DesktopLiveToast }) {
+    return (
+        <View className="relative">
+            {toast.avatar ? (
+                <Image source={{ uri: toast.avatar }} className="h-12 w-12 rounded-full" accessibilityIgnoresInvertColors />
+            ) : (
+                <View className="h-12 w-12 items-center justify-center rounded-full bg-accent/20">
+                    <Text className="text-lg font-extrabold text-accent">{toast.username.slice(0, 1).toUpperCase()}</Text>
+                </View>
+            )}
+            <View className="absolute -bottom-0.5 -right-0.5 h-4 w-4 items-center justify-center rounded-full border-2 border-panel-deep bg-danger">
+                <View className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            </View>
+        </View>
+    );
+}
 
 /**
  * Steam-style live notification, rendered alone in the Tauri toast window (transparent,
  * always on top, never focused). Rust places the window in the chosen corner; this page slides the
- * card in, queues bursts one at a time, pauses while hovered and opens the live on click.
+ * card in, queues bursts one at a time, pauses while hovered and opens the live on click. App
+ * messages (the updater's answers) use the same card with the app icon.
  */
 export function LiveToastWindow() {
     const [queue, setQueue] = useState<DesktopLiveToast[]>([]);
@@ -59,15 +79,23 @@ export function LiveToastWindow() {
 
     const fromLeft = current.corner.endsWith("left");
     const offscreen = fromLeft ? "-translate-x-[420px]" : "translate-x-[420px]";
+    const notice = current.message !== undefined;
+    // Previews and app messages have no live behind them: a click just closes them.
+    const opensLive = !current.preview && !notice;
 
     return (
         <View className={`h-full w-full justify-center bg-transparent p-2 ${fromLeft ? "items-start" : "items-end"}`}>
             <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={current.preview ? "Prévia do aviso de live. Fechar" : `${current.username} iniciou uma live. Abrir a live`}
+                accessibilityLabel={
+                    notice
+                        ? `${current.username}. ${current.message}. Fechar`
+                        : current.preview
+                            ? "Prévia do aviso de live. Fechar"
+                            : `${current.username} iniciou uma live. Abrir a live`
+                }
                 onPress={() => {
-                    // A preview has no live behind it: the click just closes it.
-                    if (!current.preview) {
+                    if (opensLive) {
                         void invoke("open_live_from_toast", { peerId: current.peerId }).catch(() => undefined);
                     }
                     setShown(false);
@@ -77,21 +105,17 @@ export function LiveToastWindow() {
                 onHoverOut={() => setHovered(false)}
                 className={`w-full flex-row items-center gap-3 rounded-2xl border border-accent/25 bg-panel-deep/95 px-4 py-3 shadow-2xl shadow-black transition-all duration-300 ease-out hover:border-accent/60 hover:bg-panel-solid active:scale-[0.98] ${shown ? "translate-x-0 opacity-100" : `${offscreen} opacity-0`}`}
             >
-                <View className="relative">
-                    {current.avatar ? (
-                        <Image source={{ uri: current.avatar }} className="h-12 w-12 rounded-full" accessibilityIgnoresInvertColors />
-                    ) : (
-                        <View className="h-12 w-12 items-center justify-center rounded-full bg-accent/20">
-                            <Text className="text-lg font-extrabold text-accent">{current.username.slice(0, 1).toUpperCase()}</Text>
-                        </View>
-                    )}
-                    <View className="absolute -bottom-0.5 -right-0.5 h-4 w-4 items-center justify-center rounded-full border-2 border-panel-deep bg-danger">
-                        <View className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-                    </View>
-                </View>
+                {notice ? (
+                    // A bundled image gets its file size as inline style on web, which beats classes.
+                    <Image source={APP_ICON} style={{ width: 48, height: 48 }} className="rounded-xl" accessibilityIgnoresInvertColors />
+                ) : (
+                    <LiveAvatar toast={current} />
+                )}
                 <View className="flex-1 gap-0.5">
                     <Text className="text-[15px] font-extrabold text-ink" numberOfLines={1}>{current.username}</Text>
-                    <Text className="text-[12px] text-muted-bright" numberOfLines={1}>Iniciou uma live</Text>
+                    <Text className="text-[12px] leading-4 text-muted-bright" numberOfLines={notice ? 2 : 1}>
+                        {notice ? current.message : "Iniciou uma live"}
+                    </Text>
                 </View>
             </Pressable>
         </View>

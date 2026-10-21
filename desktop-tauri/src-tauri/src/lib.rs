@@ -539,6 +539,10 @@ struct LiveToast {
     /// The "Prever notificação" button: same card, but a click only dismisses it.
     #[serde(default)]
     preview: bool,
+    /// An app message (updates) instead of a live: `username` is its title, the card shows the app
+    /// icon, and a click only dismisses it.
+    #[serde(default)]
+    message: Option<String>,
 }
 
 /// The latest toast, kept until the toast page takes it or the toast hides: the first one can
@@ -689,6 +693,7 @@ fn show_live_toast(
         || toast.username.trim().is_empty()
         || toast.username.len() > 100
         || !valid_avatar
+        || toast.message.as_ref().is_some_and(|message| message.len() > 200)
     {
         return Err("Invalid live notification".to_string());
     }
@@ -729,20 +734,18 @@ fn open_live_from_toast(app: AppHandle, peer_id: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open the live: {error}"))
 }
 
-/// The tray menu; once an update is downloaded it also offers to install it.
-fn tray_menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<Menu<tauri::Wry>> {
+/// The tray menu; its update entry follows the updater ("Verificar atualizações", then progress,
+/// then "Atualizar para a X" when an update has to wait).
+fn tray_menu(app: &AppHandle, update: &updates::TrayItem) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
-    if let Some(version) = update {
-        let label = format!("Atualizar para a {version} e reiniciar");
-        menu.append(&MenuItem::with_id(app, "update", label, true, None::<&str>)?)?;
-        menu.append(&PredefinedMenuItem::separator(app)?)?;
-    }
     menu.append(&MenuItem::with_id(app, "show", "Mostrar P2P-Cast", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "update", update.label(), update.enabled(), None::<&str>)?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?)?;
     Ok(menu)
 }
 
-pub(crate) fn refresh_tray_menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<()> {
+pub(crate) fn refresh_tray_menu(app: &AppHandle, update: &updates::TrayItem) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(tray_menu(app, update)?))?;
     }
@@ -752,17 +755,11 @@ pub(crate) fn refresh_tray_menu(app: &AppHandle, update: Option<&str>) -> tauri:
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("P2P-Cast")
-        .menu(&tray_menu(app, None)?)
+        .menu(&tray_menu(app, &updates::TrayItem::Check)?)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
-            "update" => {
-                // Refused while broadcasting: the window explains why and offers it again later.
-                if let Err(error) = updates::install(app) {
-                    eprintln!("{error}");
-                    show_main_window(app);
-                }
-            }
+            "update" => updates::tray_clicked(app),
             "quit" => app.exit(0),
             _ => {}
         })

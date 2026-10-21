@@ -164,6 +164,18 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
                 unlisten?.();
             };
         },
+        onUpdateNotice: (callback: (notice: DesktopUpdateNotice) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            void listen<DesktopUpdateNotice>("update-notice", event => callback(event.payload)).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            return () => {
+                active = false;
+                unlisten?.();
+            };
+        },
         // A click on the toast window comes back as "open-live" with the broadcast id.
         onNotificationWatch: (callback: (peerId: string) => void) => {
             let active = true;
