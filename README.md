@@ -113,6 +113,10 @@ O app instalado se atualiza pelo `tauri-plugin-updater`, só em dois momentos: a
 
 Para publicar uma versão, suba o `version` em `desktop-tauri/src-tauri/tauri.conf.json`, faça commit e push, e rode `npm run release -- --notes "O que mudou"` dentro de `desktop-tauri/` (com `--draft` para revisar antes). O script gera o instalador assinado, monta o `latest.json` e cria a release `desktop-v<versão>` marcada como latest, que é a que o feed resolve. A chave privada fica em `~/.tauri/p2p-cast-updater.key` (ou em `TAURI_SIGNING_PRIVATE_KEY`) e deve ter backup: sem ela, os apps instalados não aceitam mais atualizações. A chave pública está em `plugins.updater.pubkey`.
 
+### Máquina de build
+
+Os builds de release rodam na máquina Linux `ssh ligma`, não no desktop Windows. `scripts/setup-linux-build-machine.sh` instala tudo sem `sudo` (EAS CLI, Rust com `cargo-xwin` para gerar o instalador do Windows a partir do Linux, `makensis`, emulador Android) e grava o ambiente em `~/.p2pcast-build-env`. Lá: `source ~/.p2pcast-build-env`, depois `npm run release -- --no-publish` em `desktop-tauri/` e `npm run release:android -- --no-publish` em `app-react-native/`; os arquivos assinados são publicados com `gh release create` de uma máquina com acesso ao GitHub. As chaves de assinatura não são criadas pelo script: copie `~/.android/p2pcast-release.{jks,properties}` e `~/.tauri/p2p-cast-updater.key`.
+
 ## Compatibilidade do protocolo
 
 O PeerServer em `peerjs.ligmacharl.es` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.
