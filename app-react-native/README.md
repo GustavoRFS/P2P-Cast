@@ -42,8 +42,20 @@ npm test               # shared logic (src/lib)
   bundle to `production`. The app checks at launch and when it returns to the foreground, and
   `UpdateBanner` offers a restart except during a broadcast. Native changes need a new build
   (`npm run build:android`).
+- **Android APK releases**: `npm run release:android -- --notes "..."` builds the APK on EAS
+  Build (production profile, channel `production`) and publishes it as the GitHub release
+  `android-v<version>`, never marked latest (that one is the desktop feed). Bump `version` and
+  `android.versionCode` in app.json first. EAS signs it with our key,
+  `~/.android/p2pcast-release.jks`, through a git-ignored `credentials.json` (keystore path and
+  passwords; never commit it, the repository is public). Back up the key: an APK signed with
+  another one cannot install over the current app. Local Gradle release builds do not work from
+  this Windows checkout: the SDK's ninja cannot create the 260+ character paths of React Native's
+  C++ codegen.
 - **Desktop**: the Tauri updater installs new versions of the whole app, web export included; see
   "Atualizações do desktop" in the root README.
+- **Web download offer**: `InstallAppModal` suggests the Windows installer or the APK (from the
+  newest `desktop-v*` / `android-v*` release) to web visitors; iOS/iPadOS and computers without an
+  app get nothing, and "Agora não" snoozes it for 14 days.
 
 ## Platform notes
 

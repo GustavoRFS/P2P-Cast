@@ -60,7 +60,8 @@
     "build:android": "npx eas-cli@latest build --platform android --profile production",
     "build:android:preview": "npx eas-cli@latest build --platform android --profile preview",
     "update:android": "npx eas-cli@latest update --platform android --channel production --environment production",
-    "update:android:preview": "npx eas-cli@latest update --platform android --channel preview --environment preview"
+    "update:android:preview": "npx eas-cli@latest update --platform android --channel preview --environment preview",
+    "release:android": "node scripts/release-android.mjs"
   },
   "private": true
 }
