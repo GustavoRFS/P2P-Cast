@@ -181,7 +181,8 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
 
         const connect = () => {
             if (!active) return;
-            socket = new WebSocket(presenceSocketUrl(backendUrl));
+            const url = presenceSocketUrl(backendUrl);
+            socket = platform.createSocket ? platform.createSocket(url) : new WebSocket(url);
             socketRef.current = socket;
 
             socket.addEventListener("open", () => {

@@ -5,5 +5,7 @@ export type VideoViewProps = {
     muted?: boolean;
     volume?: number;
     fit?: "contain" | "cover";
+    /** Drawn above another video (Android needs this for stacked SurfaceViews). */
+    overlay?: boolean;
     className?: string;
 };

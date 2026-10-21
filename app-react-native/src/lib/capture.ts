@@ -27,7 +27,15 @@ export const CAPTURE_SOURCE_OPTIONS = [
 export type CaptureSource = (typeof CAPTURE_SOURCE_OPTIONS)[number]["value"];
 export type CaptureTrackSource = Exclude<CaptureSource, "both">;
 
+let screenCaptureSupportOverride: boolean | null = null;
+
+/** Hosts that capture the screen without getDisplayMedia (the Android native module) say so here. */
+export function setScreenCaptureSupport(supported: boolean | null): void {
+    screenCaptureSupportOverride = supported;
+}
+
 export function isScreenCaptureSupported(): boolean {
+    if (screenCaptureSupportOverride !== null) return screenCaptureSupportOverride;
     return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
 }
 

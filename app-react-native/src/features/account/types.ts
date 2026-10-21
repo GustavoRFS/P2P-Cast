@@ -36,6 +36,8 @@ export interface AccountPlatform {
     onAuthCode(listener: (code: string) => void): () => void;
     notifyLive?(user: LiveUser): void;
     onNotificationWatch?(listener: (peerId: string) => void): () => void;
+    /** Opens the presence socket; Android needs to send an Origin the backend accepts. */
+    createSocket?(url: string): WebSocket;
 }
 
 export type DiscordAccount = {

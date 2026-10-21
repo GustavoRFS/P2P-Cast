@@ -1,0 +1,9 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": [
+      "expo.modules.p2pcastnative.P2PCastNativeModule",
+      "expo.modules.p2pcastnative.P2PCastVideoViewModule"
+    ]
+  }
+}

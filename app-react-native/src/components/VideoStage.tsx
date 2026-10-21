@@ -43,7 +43,7 @@ export function VideoStage({
 
             {overlay && (
                 <View className="absolute left-3 top-12 aspect-video w-[30%] overflow-hidden rounded-lg border border-accent/30 shadow-lg shadow-black md:w-1/4">
-                    <VideoView source={overlay} muted={muted} volume={volume} fit="cover" />
+                    <VideoView source={overlay} muted={muted} volume={volume} fit="cover" overlay />
                 </View>
             )}
 

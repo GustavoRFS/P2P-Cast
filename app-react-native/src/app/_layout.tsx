@@ -1,4 +1,6 @@
 import "../global.css";
+import "../platform/storage";
+import "../platform/capabilities";
 
 import { DarkTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";

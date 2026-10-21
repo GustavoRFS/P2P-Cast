@@ -11,10 +11,13 @@ import {
     DEFAULT_CAPTURE_SETTINGS,
     formatCaptureSettings,
     FPS_OPTIONS,
+    getAvailableCaptureSourceOptions,
     getCaptureSources,
+    isScreenCaptureSupported,
     RESOLUTION_OPTIONS,
     saveCaptureSettings,
     setCaptureAudioEnabled,
+    setScreenCaptureSupport,
 } from "./capture";
 
 function createMemoryStorage(initialValue?: string) {
@@ -277,5 +280,17 @@ describe("capture settings persistence", () => {
             "p2pcast.capture-settings",
             JSON.stringify(settings),
         );
+    });
+});
+
+describe("screen capture support override", () => {
+    it("lets a native host offer the screen without getDisplayMedia", () => {
+        setScreenCaptureSupport(true);
+        try {
+            expect(isScreenCaptureSupported()).toBe(true);
+            expect(getAvailableCaptureSourceOptions().map(option => option.value)).toEqual(["screen", "camera", "both"]);
+        } finally {
+            setScreenCaptureSupport(null);
+        }
     });
 });
