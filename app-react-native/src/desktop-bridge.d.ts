@@ -49,6 +49,12 @@ declare global {
         format: "f32le";
     }
 
+    /** A signed desktop update, already downloaded and waiting to be installed. */
+    interface DesktopUpdate {
+        version: string;
+        notes: string | null;
+    }
+
     interface DesktopLiveToast {
         id: number;
         userId: string;
@@ -79,6 +85,10 @@ declare global {
             }>;
             copyShareLink?(link: string): Promise<void>;
             showLiveToast?(toast: DesktopLiveToast): Promise<void>;
+            getReadyUpdate?(): Promise<DesktopUpdate | null>;
+            /** Closes the app; the installer reopens it on the new version. */
+            installUpdate?(): Promise<void>;
+            onUpdateReady?(listener: (update: DesktopUpdate) => void): () => void;
             loginWithDiscord(codeChallenge: string): Promise<void>;
             getSavedSession(): Promise<DesktopSavedSession | null>;
             saveSession(session: DesktopSavedSession): Promise<void>;

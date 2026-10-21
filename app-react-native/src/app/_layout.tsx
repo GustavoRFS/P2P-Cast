@@ -10,6 +10,7 @@ import { AccountProvider } from "../features/account/AccountProvider";
 import { LiveToasts } from "../features/account/LiveToasts";
 import { BroadcastProvider } from "../features/session/BroadcastProvider";
 import { LiveToastWindow } from "../features/toast/LiveToastWindow";
+import { UpdateBanner } from "../features/updates/UpdateBanner";
 import { initializeDesktopBridge } from "../platform/desktop-bridge";
 import { isToastWindow } from "../platform/window-role";
 
@@ -57,6 +58,7 @@ function AppLayout() {
                     <StatusBar style="light" />
                     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#07111f" } }} />
                     <LiveToasts />
+                    <UpdateBanner />
                 </BroadcastProvider>
             </AccountProvider>
         </ThemeProvider>

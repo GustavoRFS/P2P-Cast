@@ -26,6 +26,7 @@
     "expo-status-bar": "~58.0.3",
     "expo-symbols": "~58.0.4",
     "expo-system-ui": "~58.0.6",
+    "expo-updates": "~58.0.17",
     "expo-web-browser": "~58.0.6",
     "nativewind": "^4.2.7",
     "peerjs": "^1.5.5",
@@ -55,7 +56,11 @@
     "lint": "expo lint",
     "export:web": "expo export --platform web",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:android": "npx eas-cli@latest build --platform android --profile production",
+    "build:android:preview": "npx eas-cli@latest build --platform android --profile preview",
+    "update:android": "npx eas-cli@latest update --platform android --channel production --environment production",
+    "update:android:preview": "npx eas-cli@latest update --platform android --channel preview --environment preview"
   },
   "private": true
 }

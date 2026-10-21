@@ -34,6 +34,17 @@ npm test               # shared logic (src/lib)
   Compose app (`com.p2pcast.android.*`: capture, PeerJS signaling, WebRTC, foreground service).
   JS gets state as events and renders tracks with the `P2PCastVideoView` native view.
 
+## Updates
+
+- **Android (EAS Update)**: `expo-updates` with a `fingerprint` runtime version, so a JS update only
+  reaches builds whose native side (including `modules/p2pcast-native`) matches. Builds from
+  `eas.json` carry a channel (`preview`, `production`); `npm run update:android` publishes the JS
+  bundle to `production`. The app checks at launch and when it returns to the foreground, and
+  `UpdateBanner` offers a restart except during a broadcast. Native changes need a new build
+  (`npm run build:android`).
+- **Desktop**: the Tauri updater installs new versions of the whole app, web export included; see
+  "Atualizações do desktop" in the root README.
+
 ## Platform notes
 
 - **Hermes**: shared code avoids `URLSearchParams.set`, `DOMException` and `crypto.randomUUID`

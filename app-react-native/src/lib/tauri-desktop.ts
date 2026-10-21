@@ -150,6 +150,20 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
         },
         copyShareLink: (link: string) => invoke<void>("copy_share_link", { link }),
         showLiveToast: (toast: DesktopLiveToast) => invoke<void>("show_live_toast", { toast }),
+        getReadyUpdate: () => invoke<DesktopUpdate | null>("get_ready_update"),
+        installUpdate: () => invoke<void>("install_ready_update"),
+        onUpdateReady: (callback: (update: DesktopUpdate) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            void listen<DesktopUpdate>("update-ready", event => callback(event.payload)).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            return () => {
+                active = false;
+                unlisten?.();
+            };
+        },
         // A click on the toast window comes back as "open-live" with the broadcast id.
         onNotificationWatch: (callback: (peerId: string) => void) => {
             let active = true;
