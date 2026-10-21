@@ -30,7 +30,7 @@ import {
 } from "../../lib/desktop";
 import { createPeer, sendPeerLeave } from "../../lib/peer";
 import { buildWatchUrl, loadBroadcastId, saveBroadcastId } from "../../lib/room";
-import { loadShortcutProfiles, type ShortcutProfile } from "../../lib/shortcut-profiles";
+import { loadShortcutProfiles, SYSTEM_AUDIO_SOURCE, type ShortcutProfile } from "../../lib/shortcut-profiles";
 import { getMediaError, getPeerError } from "../../lib/status";
 import type { AppError, StreamMode } from "../../lib/types";
 import { writeClipboardText } from "../../platform/clipboard";
@@ -353,12 +353,14 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
             }
             void (async () => {
                 const video = await resolveDesktopCaptureTarget(profile.videoTarget.selector);
-                const audio = await resolveDesktopCaptureTarget(profile.audioSourceSelector);
-                if (!video || !audio || audio.kind !== "window") {
+                // Monitor profiles take the system audio; window profiles need that window running.
+                const systemAudio = profile.audioSourceSelector === SYSTEM_AUDIO_SOURCE;
+                const audio = systemAudio ? null : await resolveDesktopCaptureTarget(profile.audioSourceSelector);
+                if (!video || (!systemAudio && (!audio || audio.kind !== "window"))) {
                     setError({ title: "Programa indisponível", message: "Abra novamente o programa de vídeo e áudio selecionado e atualize os alvos." });
                     return;
                 }
-                await startBroadcast(profile.settings, video.id, profile, audio.id);
+                await startBroadcast(profile.settings, video.id, profile, systemAudio ? SYSTEM_AUDIO_SOURCE : audio!.id);
             })().catch(captureError => {
                 recordCaptureFailure("shortcutProfile", captureError);
                 setError(getMediaError(captureError, "screen"));

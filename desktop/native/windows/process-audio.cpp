@@ -9,6 +9,7 @@
 #include <audioclientactivationparams.h>
 #include <ksmedia.h>
 #include <propvarutil.h>
+#include <tlhelp32.h>
 
 #include <fcntl.h>
 #include <io.h>
@@ -16,8 +17,12 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <cwctype>
 #include <iostream>
 #include <new>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 // ActivateAudioInterfaceAsync only accepts an agile handler: it must answer IAgileObject and
@@ -99,19 +104,72 @@ static bool writeBytes(const void* bytes, size_t length) {
     return static_cast<bool>(std::cout);
 }
 
+struct ProcessInfo {
+    DWORD parent;
+    std::wstring name;
+};
+
+static std::unordered_map<DWORD, ProcessInfo> snapshotProcesses() {
+    std::unordered_map<DWORD, ProcessInfo> processes;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return processes;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            std::wstring name(entry.szExeFile);
+            for (auto& character : name) character = static_cast<wchar_t>(std::towlower(character));
+            processes[entry.th32ProcessID] = { entry.th32ParentProcessID, name };
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return processes;
+}
+
+static bool isDiscord(const std::wstring& name) {
+    return name == L"discord.exe" || name == L"discordptb.exe" || name == L"discordcanary.exe";
+}
+
+// The top of Discord's process tree: a Discord process whose parent is not Discord. Excluding it
+// takes its renderer and audio service children out of the capture too.
+static DWORD findDiscordRoot(const std::unordered_map<DWORD, ProcessInfo>& processes) {
+    for (const auto& [pid, info] : processes) {
+        if (!isDiscord(info.name)) continue;
+        const auto parent = processes.find(info.parent);
+        if (parent == processes.end() || !isDiscord(parent->second.name)) return pid;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // The PCM stream must not be CRLF-translated: text mode turns every 0x0A sample byte into 0x0D 0x0A.
     _setmode(_fileno(stdout), _O_BINARY);
 
-    if (argc != 2) return fail("Expected a desktop window handle");
-    char* end = nullptr;
-    const unsigned long long rawHandle = std::strtoull(argv[1], &end, 0);
-    if (!end || *end != '\0' || rawHandle == 0) return fail("Invalid desktop window handle");
+    if (argc != 2) return fail("Expected a desktop window handle or --system");
 
-    const HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(rawHandle));
+    // A window captures its own process tree. --system (a whole monitor) captures everything the
+    // PC plays except one tree: Discord, so a voice call is not sent back to the people in it, or
+    // P2P-Cast itself (our parent) when Discord is not running.
     DWORD processId = 0;
-    if (!IsWindow(window) || GetWindowThreadProcessId(window, &processId) == 0 || processId == 0) {
-        return fail("Could not resolve the selected window to an application process");
+    PROCESS_LOOPBACK_MODE loopbackMode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+    if (std::strcmp(argv[1], "--system") == 0) {
+        const auto processes = snapshotProcesses();
+        processId = findDiscordRoot(processes);
+        if (processId == 0) {
+            const auto self = processes.find(GetCurrentProcessId());
+            processId = self != processes.end() ? self->second.parent : 0;
+        }
+        if (processId == 0) return fail("Could not find a process to leave out of the system audio");
+        loopbackMode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
+    } else {
+        char* end = nullptr;
+        const unsigned long long rawHandle = std::strtoull(argv[1], &end, 0);
+        if (!end || *end != '\0' || rawHandle == 0) return fail("Invalid desktop window handle");
+
+        const HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(rawHandle));
+        if (!IsWindow(window) || GetWindowThreadProcessId(window, &processId) == 0 || processId == 0) {
+            return fail("Could not resolve the selected window to an application process");
+        }
     }
 
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -126,7 +184,7 @@ int main(int argc, char** argv) {
     AUDIOCLIENT_ACTIVATION_PARAMS activationParams{};
     activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
     activationParams.ProcessLoopbackParams.TargetProcessId = processId;
-    activationParams.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+    activationParams.ProcessLoopbackParams.ProcessLoopbackMode = loopbackMode;
 
     PROPVARIANT activationProperty;
     PropVariantInit(&activationProperty);

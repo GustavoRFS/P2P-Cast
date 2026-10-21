@@ -7,7 +7,7 @@ import { TextField } from "../../components/Field";
 import { Note, Panel, PanelHeading } from "../../components/Panel";
 import { Select } from "../../components/Select";
 import { formatCaptureSettings, type CaptureSettings } from "../../lib/capture";
-import { saveShortcutProfiles, type ShortcutProfile } from "../../lib/shortcut-profiles";
+import { saveShortcutProfiles, SYSTEM_AUDIO_SOURCE, type ShortcutProfile } from "../../lib/shortcut-profiles";
 import type { DesktopState } from "../session/types";
 import { ShortcutInput } from "./ShortcutInput";
 
@@ -59,16 +59,13 @@ export function ShortcutProfiles({
             setMessage("Informe nome, programa e atalho.");
             return;
         }
-        if (selectedTarget.kind !== "window") {
-            setMessage("O áudio isolado precisa de uma janela de programa; um monitor inteiro não tem áudio próprio.");
-            return;
-        }
         const profile: ShortcutProfile = {
             id: crypto.randomUUID(),
             name: name.trim(),
             videoTarget: { kind: selectedTarget.kind, selector: selectedTarget.selector },
             captureMethod: "direct",
-            audioSourceSelector: selectedTarget.selector,
+            // A window brings its own audio; a whole monitor brings the system's, minus Discord.
+            audioSourceSelector: selectedTarget.kind === "window" ? selectedTarget.selector : SYSTEM_AUDIO_SOURCE,
             shortcut: shortcut.trim().replace(/\s/g, ""),
             // The shortcut carries its own copy of the transmission settings.
             settings: { ...draft, source: "screen", audio: true },
@@ -95,7 +92,10 @@ export function ShortcutProfiles({
                             </View>
                             <View className="flex-1 gap-0.5">
                                 <Text className="text-[12px] font-extrabold text-ink" numberOfLines={1}>{profile.name}</Text>
-                                <Text className="text-[10px] text-muted" numberOfLines={1}>{formatCaptureSettings(profile.settings)}</Text>
+                                <Text className="text-[10px] text-muted" numberOfLines={1}>
+                                    {profile.videoTarget.kind === "monitor" ? "tela inteira · áudio do sistema sem Discord · " : ""}
+                                    {formatCaptureSettings(profile.settings)}
+                                </Text>
                             </View>
                             <Button
                                 size="sm"
@@ -148,6 +148,9 @@ export function ShortcutProfiles({
                             : targets.map(target => ({ value: target.id, label: target.name }))}
                         onChange={setTargetId}
                     />
+                    {selectedTarget?.kind === "monitor" && (
+                        <Note>Tela inteira: vai junto todo o áudio do PC, menos o do Discord, para a call não voltar para quem está nela.</Note>
+                    )}
                 </View>
                 <CaptureSettingsFields
                     fixedSource

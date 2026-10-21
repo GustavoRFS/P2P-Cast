@@ -24,6 +24,9 @@ export type ShortcutProfile = {
 
 export const SHORTCUT_PROFILES_STORAGE_KEY = "p2pcast.shortcut-profiles.v1";
 
+/** Audio source of monitor profiles: everything the PC plays except Discord. */
+export const SYSTEM_AUDIO_SOURCE = "system";
+
 const MODIFIERS = ["Ctrl", "Alt", "Shift", "Super"] as const;
 const COMMON_KEYS = new Set([
     "Space", "Tab", "Enter", "Escape", "Backspace", "Delete", "Insert", "Home", "End",

@@ -94,23 +94,31 @@ fn emit_audio(app: &AppHandle, capture_id: &str, chunk: Vec<u8>) {
     );
 }
 
+const SYSTEM_AUDIO_SOURCE: &str = "system";
+
 pub fn start(
     app: AppHandle,
     state: &AudioCaptures,
     source_id: String,
 ) -> Result<AudioStarted, String> {
-    let Some(raw_handle) = source_id.strip_prefix("window:") else {
-        return Err("Select a running application window as the audio source.".to_string());
+    // "system" is a whole monitor: every sound on the PC except Discord (see the helper).
+    let helper_argument = if source_id == SYSTEM_AUDIO_SOURCE {
+        "--system".to_string()
+    } else {
+        let Some(raw_handle) = source_id.strip_prefix("window:") else {
+            return Err("Select a running application window as the audio source.".to_string());
+        };
+        if raw_handle.is_empty()
+            || raw_handle.len() > 32
+            || !raw_handle.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err("Invalid Windows application handle.".to_string());
+        }
+        format!("0x{raw_handle}")
     };
-    if raw_handle.is_empty()
-        || raw_handle.len() > 32
-        || !raw_handle.bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        return Err("Invalid Windows application handle.".to_string());
-    }
 
     let child = Command::new(helper_path(&app)?)
-        .arg(format!("0x{raw_handle}"))
+        .arg(helper_argument)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
