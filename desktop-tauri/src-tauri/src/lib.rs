@@ -541,7 +541,7 @@ struct LiveToast {
     preview: bool,
     /// An app message (updates) instead of a live: `username` is its title, the card shows the app
     /// icon, and a click only dismisses it.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     message: Option<String>,
 }
 
@@ -580,7 +580,7 @@ fn ensure_toast_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     {
         builder = builder.additional_browser_args(&arguments);
     }
-    builder
+    let window = builder
         .title("P2P-Cast")
         .inner_size(TOAST_WIDTH, TOAST_HEIGHT)
         .resizable(false)
@@ -593,7 +593,42 @@ fn ensure_toast_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|error| format!("Could not create the notification window: {error}"))
+        .map_err(|error| format!("Could not create the notification window: {error}"))?;
+    #[cfg(windows)]
+    set_toast_styles(&window)?;
+    Ok(window)
+}
+
+/// Makes the toast a frameless popup tool window that never activates. Tiling window managers
+/// decide from the style a window has when it appears: komorebi tiles anything with WS_CAPTION and
+/// WS_EX_WINDOWEDGE, which tao keeps on undecorated windows, and the WS_EX_LAYERED that would make
+/// it skip the toast only shows up later, with the transparency. So the frame styles go before the
+/// toast is ever shown, and every show re-checks them.
+#[cfg(windows)]
+fn set_toast_styles(window: &WebviewWindow) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+        WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_WINDOWEDGE, WS_POPUP, WS_VISIBLE,
+    };
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as _;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let wanted_style = WS_POPUP | (style & (WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN));
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let frame = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_DLGMODALFRAME;
+        let wanted_ex_style = (ex_style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & !frame;
+        if wanted_style == style && wanted_ex_style == ex_style {
+            return Ok(());
+        }
+        SetWindowLongPtrW(hwnd, GWL_STYLE, wanted_style as i32 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted_ex_style as i32 as isize);
+        let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
+        SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, flags);
+    }
+    Ok(())
 }
 
 /// The toast's physical rect (x, y, width, height) in a corner of the primary monitor's work area,
@@ -625,26 +660,19 @@ fn toast_rect(window: &WebviewWindow, corner: &str) -> Result<(i32, i32, i32, i3
 }
 
 /// Shows the toast without activating it. tao's show() uses SW_SHOW (which takes the focus) and
-/// rewrites the extended style, so on Windows this goes straight to Win32: a topmost tool window,
-/// out of the taskbar and Alt+Tab and ignored by tiling window managers such as komorebi.
+/// rewrites the styles, so on Windows this goes straight to Win32: a topmost popup tool window, out
+/// of the taskbar and Alt+Tab and ignored by tiling window managers such as komorebi.
 #[cfg(windows)]
 fn show_toast_window(window: &WebviewWindow, (x, y, width, height): (i32, i32, i32, i32)) -> Result<(), String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_SHOWWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     };
 
+    set_toast_styles(window)?;
     let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as _;
-    unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let wanted = (style | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize) & !(WS_EX_APPWINDOW as isize);
-        if wanted != style {
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
-        }
-        let flags = SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED;
-        if SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags) == 0 {
-            return Err("Could not show the notification".to_string());
-        }
+    let shown = unsafe { SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW) };
+    if shown == 0 {
+        return Err("Could not show the notification".to_string());
     }
     Ok(())
 }

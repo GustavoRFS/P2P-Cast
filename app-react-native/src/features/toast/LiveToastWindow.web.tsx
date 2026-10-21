@@ -79,7 +79,7 @@ export function LiveToastWindow() {
 
     const fromLeft = current.corner.endsWith("left");
     const offscreen = fromLeft ? "-translate-x-[420px]" : "translate-x-[420px]";
-    const notice = current.message !== undefined;
+    const notice = typeof current.message === "string";
     // Previews and app messages have no live behind them: a click just closes them.
     const opensLive = !current.preview && !notice;
 
