@@ -11,7 +11,7 @@ import {
     saveViewerVolume,
     type ChatMessage,
 } from "../../lib/chat";
-import { createPeer } from "../../lib/peer";
+import { createPeer, sendPeerLeave } from "../../lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "../../lib/receiver";
 import { getPeerError } from "../../lib/status";
 import type { AppError, StreamMode } from "../../lib/types";
@@ -72,11 +72,13 @@ export function useViewerSession(broadcastId: string): ViewerSession {
         receivedMediaSourcesRef.current.clear();
         chatConnRef.current?.close();
         chatConnRef.current = null;
+        // Tell the broadcaster right away; otherwise it keeps this session until WebRTC notices.
+        if (peer?.open) sendPeerLeave(peer, broadcastId);
         peer?.destroy();
         setRemoteMedia(EMPTY_MEDIA_SOURCES);
         resetChat();
         setChatReady(false);
-    }, [resetChat]);
+    }, [broadcastId, resetChat]);
 
     const connect = useCallback(() => {
         cleanup();

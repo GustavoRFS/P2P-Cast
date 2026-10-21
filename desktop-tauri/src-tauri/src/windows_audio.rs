@@ -121,14 +121,21 @@ pub fn start(
         format!("0x{raw_handle}")
     };
 
-    let child = Command::new(helper_path(&app)?)
+    let mut command = Command::new(helper_path(&app)?);
+    command
         .arg(helper_argument)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // The helper is a console program: started from the windowless app it would open a terminal.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start isolated application audio: {error}"))?;
-    let mut child = child;
     let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         return Err("Could not open the audio helper output.".to_string());

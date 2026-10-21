@@ -242,14 +242,26 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                 }
 
                 const viewerIdentity = getMediaConnectionIdentity(call.peer, call.metadata);
+                const viewerSessionId = getMediaConnectionSessionId(call.peer, call.metadata);
                 const activeCallsForViewer = callsRef.current.filter(activeCall =>
                     getMediaConnectionIdentity(activeCall.peer, activeCall.metadata) === viewerIdentity,
                 );
-                const viewerSessionId = getMediaConnectionSessionId(call.peer, call.metadata);
-                const anotherSessionIsActive = activeCallsForViewer.some(activeCall =>
+                // A viewer's newest session wins. One that left (or reloaded) and comes back must not be
+                // locked out by its old calls: PeerJS can take a long time, or never, to report them
+                // closed. Two tabs on one device end up with the newest one.
+                const staleCalls = activeCallsForViewer.filter(activeCall =>
                     getMediaConnectionSessionId(activeCall.peer, activeCall.metadata) !== viewerSessionId,
                 );
-                if (anotherSessionIsActive || activeCallsForViewer.length >= MAX_MEDIA_CONNECTIONS_PER_SESSION) {
+                if (staleCalls.length) {
+                    const stalePeers = new Set(staleCalls.map(staleCall => staleCall.peer));
+                    callsRef.current = callsRef.current.filter(activeCall => !staleCalls.includes(activeCall));
+                    staleCalls.forEach(staleCall => staleCall.close());
+                    chatConnectionsRef.current
+                        .filter(conn => stalePeers.has(conn.peer))
+                        .forEach(conn => conn.close());
+                    updateViewerCount();
+                }
+                if (activeCallsForViewer.length - staleCalls.length >= MAX_MEDIA_CONNECTIONS_PER_SESSION) {
                     call.close();
                     sendPeerLeave(peer, call.peer);
                     return;

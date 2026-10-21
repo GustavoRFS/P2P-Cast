@@ -282,6 +282,8 @@ class RtcViewerSession(
         mediaLinks.clear()
         chatLink?.close()
         chatLink = null
+        // Tell the broadcaster right away; otherwise it keeps this session until WebRTC notices.
+        broadcastId?.let { id -> signaling?.sendLeave(id) }
         signaling?.close()
         signaling = null
         chat.reset()

@@ -12,6 +12,7 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter, Manager};
 
 const FRAME_MAGIC: u32 = 0x50434652;
@@ -129,7 +130,8 @@ pub fn start(
         _ => return Err("Invalid cursor capture setting.".to_string()),
     };
 
-    let mut child = Command::new(helper_path(&app)?)
+    let mut command = Command::new(helper_path(&app)?);
+    command
         .arg(kind)
         .arg(raw_handle)
         .arg(settings.fps.to_string())
@@ -137,6 +139,9 @@ pub fn start(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // The helper is a console program: started from the windowless app it would open a terminal.
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("Could not start Windows Graphics Capture: {error}"))?;
     let Some(stdout) = child.stdout.take() else {

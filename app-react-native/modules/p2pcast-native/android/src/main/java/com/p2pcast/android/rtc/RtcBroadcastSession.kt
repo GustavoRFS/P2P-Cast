@@ -232,10 +232,12 @@ class RtcBroadcastSession(
         val signalingClient = signaling ?: return
         if (videoTrack == null) return
 
-        if (!reserveMediaConnection(connectionId, viewerId, viewerSessionId)) {
+        val evicted = reserveMediaConnection(connectionId, viewerId, viewerSessionId)
+        if (evicted == null) {
             signalingClient.sendLeave(src)
             return
         }
+        evicted.forEach { staleConnectionId -> mediaLinks[staleConnectionId]?.close() }
 
         var link: PeerLink? = null
         val pc = engine.factory.createPeerConnection(
@@ -298,17 +300,26 @@ class RtcBroadcastSession(
         updateViewerCount()
     }
 
-    private fun reserveMediaConnection(connectionId: String, viewerId: String, sessionId: String): Boolean =
+    /**
+     * Reserves a media connection, or returns null when it is refused. A viewer's newest session
+     * wins: one that left (or reloaded) and comes back must not be locked out by its old
+     * connections, which WebRTC can take a long time to report closed. Returns the evicted
+     * connection ids of the viewer's other sessions, for the caller to close.
+     */
+    private fun reserveMediaConnection(connectionId: String, viewerId: String, sessionId: String): List<String>? =
         synchronized(mediaAdmissionLock) {
-            val activeSessions = mediaViewerReservations.values.filter { it.viewerId == viewerId }
-            if (connectionId in mediaViewerReservations ||
-                activeSessions.size >= MAX_MEDIA_CONNECTIONS_PER_SESSION ||
-                activeSessions.any { it.sessionId != sessionId }
-            ) {
-                false
+            if (connectionId in mediaViewerReservations) return@synchronized null
+            val evicted = mediaViewerReservations
+                .filterValues { it.viewerId == viewerId && it.sessionId != sessionId }
+                .keys
+                .toList()
+            evicted.forEach { mediaViewerReservations.remove(it) }
+            val sameSession = mediaViewerReservations.values.count { it.viewerId == viewerId && it.sessionId == sessionId }
+            if (sameSession >= MAX_MEDIA_CONNECTIONS_PER_SESSION) {
+                null
             } else {
                 mediaViewerReservations[connectionId] = MediaViewerReservation(viewerId, sessionId)
-                true
+                evicted
             }
         }
 
