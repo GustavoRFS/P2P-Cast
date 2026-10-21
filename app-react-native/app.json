@@ -7,8 +7,12 @@
       "policy": "fingerprint"
     },
     "updates": {
+      "url": "https://u.expo.dev/d3dfdcf1-919c-4c20-9246-6f5506bf5834",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -41,7 +45,8 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -74,6 +79,12 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "backgroundColor": "#07111f"
+    "backgroundColor": "#07111f",
+    "extra": {
+      "eas": {
+        "projectId": "d3dfdcf1-919c-4c20-9246-6f5506bf5834"
+      }
+    },
+    "owner": "gustavorfsdev"
   }
 }

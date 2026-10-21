@@ -7,6 +7,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { AccountProvider } from "../features/account/AccountProvider";
+import { InstallAppModal } from "../features/install/InstallAppModal";
 import { LiveToasts } from "../features/account/LiveToasts";
 import { BroadcastProvider } from "../features/session/BroadcastProvider";
 import { LiveToastWindow } from "../features/toast/LiveToastWindow";
@@ -59,6 +60,7 @@ function AppLayout() {
                     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#07111f" } }} />
                     <LiveToasts />
                     <UpdateBanner />
+                    <InstallAppModal />
                 </BroadcastProvider>
             </AccountProvider>
         </ThemeProvider>

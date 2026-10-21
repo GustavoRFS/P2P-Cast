@@ -8,7 +8,6 @@ import { ErrorCard } from "../../components/Status";
 import { useAccount } from "../account/AccountProvider";
 import { DiscordDrawer } from "../account/DiscordDrawer";
 import { useBroadcast } from "../session/BroadcastProvider";
-import { AndroidAppBanner } from "./AndroidAppBanner";
 import { WatchLinkPanel } from "./WatchLinkPanel";
 
 /**
@@ -23,7 +22,6 @@ export function HomeView() {
     return (
         <View className="flex-1 bg-bg">
             <Screen>
-                <AndroidAppBanner />
                 {broadcast.error && (
                     <ErrorCard
                         error={broadcast.error}
