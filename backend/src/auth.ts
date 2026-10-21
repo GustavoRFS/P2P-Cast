@@ -16,7 +16,14 @@ type DiscordUserResponse = {
     avatar?: unknown;
 };
 
-type DesktopHost = "electron" | "tauri";
+type DesktopHost = "electron" | "tauri" | "android";
+
+// Where each client listens for the OAuth hand-off.
+const CALLBACK_SCHEMES: Record<DesktopHost, string> = {
+    electron: "p2pcast",
+    tauri: "p2pcast-tauri",
+    android: "p2pcast-app",
+};
 type PendingOAuth = { challenge: string; host: DesktopHost; expiresAt: number };
 type PendingExchange = { user: DiscordProfile; challenge: string; expiresAt: number };
 
@@ -130,7 +137,7 @@ export function createAuthRoutes(config: BackendConfig) {
         }, {
             query: t.Object({
                 code_challenge: t.String({ minLength: 43, maxLength: 43 }),
-                host: t.Optional(t.Union([t.Literal("electron"), t.Literal("tauri")])),
+                host: t.Optional(t.Union([t.Literal("electron"), t.Literal("tauri"), t.Literal("android")])),
             }),
         })
         .get("/auth/discord/callback", async ({ query, set }) => {
@@ -187,7 +194,7 @@ export function createAuthRoutes(config: BackendConfig) {
 
                 const code = randomCode();
                 exchangeCodes.set(code, { user, challenge: pendingState.challenge, expiresAt: Date.now() + EXCHANGE_CODE_TTL_MS });
-                const scheme = pendingState.host === "electron" ? "p2pcast" : "p2pcast-tauri";
+                const scheme = CALLBACK_SCHEMES[pendingState.host];
                 const deepLink = new URL(`${scheme}://auth/callback`);
                 deepLink.searchParams.set("code", code);
                 set.status = 302;
