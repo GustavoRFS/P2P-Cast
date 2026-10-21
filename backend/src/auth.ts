@@ -2,6 +2,7 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { Elysia, t } from "elysia";
 import { SignJWT, jwtVerify } from "jose";
 import type { BackendConfig } from "./config";
+import { escapeHtml, handoffResponse } from "./handoff";
 
 export type DiscordProfile = {
     id: string;
@@ -37,9 +38,7 @@ function randomCode(): string {
 }
 
 function htmlResponse(status: number, title: string, message: string): Response {
-    const escape = (value: string) => value.replace(/[&<>"']/g, character => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-    })[character]!);
+    const escape = escapeHtml;
     return new Response(
         `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(title)}</title><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;background:#07111f;color:#edf5ff"><h1>${escape(title)}</h1><p>${escape(message)}</p><p>Você pode fechar esta aba e voltar ao P2P-Cast.</p></body></html>`,
         { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
@@ -197,6 +196,9 @@ export function createAuthRoutes(config: BackendConfig) {
                 const scheme = CALLBACK_SCHEMES[pendingState.host];
                 const deepLink = new URL(`${scheme}://auth/callback`);
                 deepLink.searchParams.set("code", code);
+                // Android's auth session intercepts the redirect itself; desktop browsers need the
+                // hand-off page (see handoffResponse).
+                if (pendingState.host !== "android") return handoffResponse(deepLink.toString());
                 set.status = 302;
                 set.headers.location = deepLink.toString();
                 set.headers["cache-control"] = "no-store";
