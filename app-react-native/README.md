@@ -42,15 +42,16 @@ npm test               # shared logic (src/lib)
   bundle to `production`. The app checks at launch and when it returns to the foreground, and
   `UpdateBanner` offers a restart except during a broadcast. Native changes need a new build
   (`npm run build:android`).
-- **Android APK releases**: `npm run release:android -- --notes "..."` builds the APK on EAS
-  Build (production profile, channel `production`) and publishes it as the GitHub release
+- **Android APK releases**: `npm run release:android -- --notes "..."` prebuilds, runs the Gradle
+  release build (arm64-v8a), checks that the APK's runtime fingerprint matches the project's (so EAS
+  updates reach it), re-signs it with our key `~/.android/p2pcast-release.jks` (passwords in
+  `~/.android/p2pcast-release.properties`) and publishes it as the GitHub release
   `android-v<version>`, never marked latest (that one is the desktop feed). Bump `version` and
-  `android.versionCode` in app.json first. EAS signs it with our key,
-  `~/.android/p2pcast-release.jks`, through a git-ignored `credentials.json` (keystore path and
-  passwords; never commit it, the repository is public). Back up the key: an APK signed with
-  another one cannot install over the current app. Local Gradle release builds do not work from
-  this Windows checkout: the SDK's ninja cannot create the 260+ character paths of React Native's
-  C++ codegen.
+  `android.versionCode` in app.json first, and back up the key: an APK signed with another one
+  cannot install over the current app. On Windows the build needs a CMake whose ninja handles long
+  paths (`~/.android/cmake-3.22.1-ninja-1.13.2`, see the script header): the SDK's ninja 1.10 fails
+  on React Native's 260+ character C++ codegen paths. `--eas` builds on EAS instead, signing with
+  the same key through a git-ignored `credentials.json` (never commit it, the repository is public).
 - **Desktop**: the Tauri updater installs new versions of the whole app, web export included; see
   "Atualizações do desktop" in the root README.
 - **Web download offer**: `InstallAppModal` suggests the Windows installer or the APK (from the
