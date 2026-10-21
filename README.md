@@ -107,6 +107,12 @@ O Tauri lista janelas e monitores e oferece dois métodos nos perfis de atalho: 
 
 Antes de empacotar no Windows, compile os dois helpers nativos em `desktop/` com `npm run build:audio:windows`. O comando gera e copia `desktop/resources/p2pcast-process-audio.exe` e `desktop/resources/p2pcast-wgc-capture.exe`; o pacote Tauri inclui ambos. A integração WGC e o build de frontend passam nas verificações disponíveis aqui, mas a compilação dos helpers e a captura/teardown precisam de validação em uma máquina Windows. Para comparar desempenho, rode Electron e Tauri no mesmo computador com resolução, FPS, bitrate, conta e número de espectadores iguais.
 
+### Atualizações do desktop
+
+O app instalado se atualiza sozinho pelo `tauri-plugin-updater`: ao abrir e a cada 6 horas ele lê `https://github.com/GustavoRFS/P2P-Cast/releases/latest/download/latest.json`, baixa o instalador, confere a assinatura e só instala sem transmissão em andamento (logo ao iniciar no tray, ou pelo botão "Atualizar" no app e no menu do tray). O instalador NSIS roda em modo passivo e reabre o app.
+
+Para publicar uma versão, suba o `version` em `desktop-tauri/src-tauri/tauri.conf.json`, faça commit e push, e rode `npm run release -- --notes "O que mudou"` dentro de `desktop-tauri/` (com `--draft` para revisar antes). O script gera o instalador assinado, monta o `latest.json` e cria a release `desktop-v<versão>` marcada como latest, que é a que o feed resolve. A chave privada fica em `~/.tauri/p2p-cast-updater.key` (ou em `TAURI_SIGNING_PRIVATE_KEY`) e deve ter backup: sem ela, os apps instalados não aceitam mais atualizações. A chave pública está em `plugins.updater.pubkey`.
+
 ## Compatibilidade do protocolo
 
 O PeerServer em `peerjs.ligmacharl.es` faz a sinalização inicial, o link de sala continua contendo o peer ID e os streams continuam ponto a ponto. O backend Elysia não substitui PeerJS e não participa do transporte de mídia. Web, Android e desktop podem continuar assistindo uns aos outros quando compartilham o mesmo peer ID/link e uma rota WebRTC direta é possível.

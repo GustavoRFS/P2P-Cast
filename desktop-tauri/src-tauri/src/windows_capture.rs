@@ -88,6 +88,10 @@ impl VideoCaptures {
     pub fn is_available(app: &AppHandle) -> bool {
         helper_path(app).is_ok()
     }
+
+    pub fn is_active(&self) -> bool {
+        self.captures.lock().map_or(true, |captures| !captures.is_empty())
+    }
 }
 
 fn emit_video_error(app: &AppHandle, capture_id: &str, message: impl Into<String>) {

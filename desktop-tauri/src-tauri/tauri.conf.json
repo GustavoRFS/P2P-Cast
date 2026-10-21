@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "P2P-Cast Tauri",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.p2pcast.desktop.tauri",
   "build": {
     "beforeDevCommand": "npm --prefix ../app-react-native run start -- --port 5173",
@@ -28,6 +28,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "resources": {
       "../../desktop/resources/p2pcast-process-audio.exe": "p2pcast-process-audio.exe",
       "../../desktop/resources/p2pcast-wgc-capture.exe": "p2pcast-wgc-capture.exe"
@@ -55,6 +56,15 @@
         "schemes": [
           "p2pcast-tauri"
         ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4NEIwODI4RDFDRkNFQkEKUldTNnpzL1JLQWhMeUNLWDJJVGZwbjNvRndOZnBiVDhCaEltcExKM3hselZRMGxUWWpUTjE3UEcK",
+      "endpoints": [
+        "https://github.com/GustavoRFS/P2P-Cast/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

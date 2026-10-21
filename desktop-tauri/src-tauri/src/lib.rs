@@ -11,7 +11,7 @@ use std::{
 use keyring::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
@@ -21,6 +21,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+mod updates;
 mod windows_audio;
 #[cfg(windows)]
 mod windows_capture;
@@ -728,17 +729,40 @@ fn open_live_from_toast(app: AppHandle, peer_id: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open the live: {error}"))
 }
 
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Mostrar P2P-Cast", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+/// The tray menu; once an update is downloaded it also offers to install it.
+fn tray_menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+    if let Some(version) = update {
+        let label = format!("Atualizar para a {version} e reiniciar");
+        menu.append(&MenuItem::with_id(app, "update", label, true, None::<&str>)?)?;
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    menu.append(&MenuItem::with_id(app, "show", "Mostrar P2P-Cast", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?)?;
+    Ok(menu)
+}
 
+pub(crate) fn refresh_tray_menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<()> {
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_menu(Some(tray_menu(app, update)?))?;
+    }
+    Ok(())
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("P2P-Cast")
-        .menu(&menu)
+        .menu(&tray_menu(app, None)?)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
+            "update" => {
+                // Refused while broadcasting: the window explains why and offers it again later.
+                if let Err(error) = updates::install(app) {
+                    eprintln!("{error}");
+                    show_main_window(app);
+                }
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -768,9 +792,11 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(windows_audio::AudioCaptures::default())
         .manage(windows_capture::VideoCaptures::default())
         .manage(PendingLiveToast::default())
+        .manage(updates::PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             desktop_config,
             list_capture_targets,
@@ -795,6 +821,8 @@ pub fn run() {
             take_pending_live_toast,
             hide_live_toast,
             open_live_from_toast,
+            updates::get_ready_update,
+            updates::install_ready_update,
         ])
         .on_window_event(|window, event| {
             // Closing the window would end the process and unregister the shortcuts; keep the app
@@ -811,6 +839,7 @@ pub fn run() {
             if let Err(error) = ensure_toast_window(app.handle()) {
                 eprintln!("{error}");
             }
+            updates::start(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -8,6 +8,10 @@ impl VideoCaptures {
     pub fn is_available(_app: &tauri::AppHandle) -> bool {
         false
     }
+
+    pub fn is_active(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Serialize)]

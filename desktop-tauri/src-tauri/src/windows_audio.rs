@@ -30,6 +30,10 @@ impl AudioCaptures {
             false
         }
     }
+
+    pub fn is_active(&self) -> bool {
+        self.captures.lock().map_or(true, |captures| !captures.is_empty())
+    }
 }
 
 struct Capture {

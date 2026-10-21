@@ -1,6 +1,6 @@
 [package]
 name = "p2p-cast-desktop-tauri"
-version = "0.2.0"
+version = "0.3.0"
 description = "P2P-Cast desktop host built with Tauri"
 authors = ["P2P-Cast"]
 edition = "2021"
@@ -22,6 +22,7 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-updater = "2"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
