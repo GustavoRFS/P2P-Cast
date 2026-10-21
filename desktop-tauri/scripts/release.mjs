@@ -4,7 +4,12 @@
 //
 //   npm run release -- --notes "O que mudou"      build, then publish desktop-v<version>
 //   npm run release -- --draft                    publish as a draft (invisible to the updater)
-//   npm run release -- --skip-build               reuse the installer already in target/release
+//   npm run release -- --skip-build               reuse the installer already built
+//   npm run release -- --no-publish               build and stage only (then upload it with gh)
+//
+// On Linux (the `ssh ligma` build box) it cross-compiles with cargo-xwin for x86_64-pc-windows-msvc,
+// which needs rustup's Windows target, cargo-xwin, lld-link, llvm-rc and a makensis on PATH (see
+// ~/.p2pcast-build-env there). The helpers in desktop/resources are prebuilt Windows binaries.
 //
 // Bump "version" in src-tauri/tauri.conf.json first; installed apps only update to a higher one.
 // Signing key: TAURI_SIGNING_PRIVATE_KEY (path or content), defaulting to
@@ -55,14 +60,22 @@ if (!env.TAURI_SIGNING_PRIVATE_KEY) {
 }
 env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
 
+const cross = process.platform !== "win32";
+const targetDir = cross
+    ? join(root, "src-tauri", "target", "x86_64-pc-windows-msvc", "release")
+    : join(root, "src-tauri", "target", "release");
+
 if (!flag("--skip-build")) {
-    // npm is a .cmd on Windows, so it needs a shell; a single command string keeps Node from
-    // warning about unescaped arguments.
-    const build = spawnSync("npm run build:windows", { cwd: root, env, stdio: "inherit", shell: true });
+    // npm/npx are .cmd files on Windows, so this needs a shell; a single command string keeps Node
+    // from warning about unescaped arguments.
+    const command = cross
+        ? "npx tauri build --bundles nsis --runner cargo-xwin --target x86_64-pc-windows-msvc"
+        : "npm run build:windows";
+    const build = spawnSync(command, { cwd: root, env, stdio: "inherit", shell: true });
     if (build.status !== 0) fail("the build failed");
 }
 
-const bundleDir = join(root, "src-tauri", "target", "release", "bundle", "nsis");
+const bundleDir = join(targetDir, "bundle", "nsis");
 const installer = existsSync(bundleDir)
     ? readdirSync(bundleDir).find(name => name.endsWith(`_${version}_x64-setup.exe`))
     : undefined;
@@ -72,7 +85,7 @@ if (!installer || !existsSync(join(bundleDir, `${installer}.sig`))) {
 
 // Asset names without spaces, so their URLs stay readable.
 const assetName = `P2P-Cast_${version}_x64-setup.exe`;
-const stageDir = join(root, "src-tauri", "target", "release", "bundle", "github-release");
+const stageDir = join(targetDir, "bundle", "github-release");
 rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 copyFileSync(join(bundleDir, installer), join(stageDir, assetName));
@@ -88,6 +101,12 @@ const feed = {
     },
 };
 writeFileSync(join(stageDir, "latest.json"), `${JSON.stringify(feed, null, 2)}\n`);
+
+// For a build machine without GitHub credentials: the staged files are published from elsewhere.
+if (flag("--no-publish")) {
+    console.log(`release: staged ${tag} for commit ${commit} in ${stageDir} (not published)`);
+    process.exit(0);
+}
 
 // "latest" is what the feed URL resolves to, so a desktop release must always be marked latest.
 const releaseArgs = [
