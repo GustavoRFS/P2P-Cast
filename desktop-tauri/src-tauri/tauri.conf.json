@@ -4,10 +4,10 @@
   "version": "0.2.0",
   "identifier": "com.p2pcast.desktop.tauri",
   "build": {
-    "beforeDevCommand": "npm --prefix ../web run dev -- --host 127.0.0.1 --strictPort",
+    "beforeDevCommand": "npm --prefix ../app-react-native run start -- --port 5173",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "npm --prefix ../web run build",
-    "frontendDist": "../../web/dist"
+    "beforeBuildCommand": "npm --prefix ../app-react-native run export:web",
+    "frontendDist": "../../app-react-native/dist"
   },
   "app": {
     "windows": [

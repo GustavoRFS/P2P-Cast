@@ -2,6 +2,9 @@
 module.exports = {
     content: ["./src/**/*.{js,jsx,ts,tsx}"],
     presets: [require("nativewind/preset")],
+    // The app is always dark and has no dark: variants. "class" keeps css-interop from throwing
+    // when the host page toggles a class on <html> (seen inside the Tauri WebView2).
+    darkMode: "class",
     theme: {
         extend: {
             // Palette carried over from the original web client (web/src/index.css).
