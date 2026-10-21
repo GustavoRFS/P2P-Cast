@@ -1,7 +1,10 @@
 use std::{
     fs,
+    io::{BufRead, BufReader, Write},
+    net::{TcpListener, TcpStream},
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use keyring::{Entry, Error as KeyringError};
@@ -9,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -409,14 +412,85 @@ async fn open_discord_login(app: AppHandle, code_challenge: String) -> Result<()
         return Err("Invalid login challenge".to_string());
     }
     let config = get_desktop_config(&app)?;
+    let port = start_login_listener(app.clone())?;
     let mut url = Url::parse(&format!("{}/auth/discord", config.backend_url))
         .map_err(|error| format!("Could not build Discord login URL: {error}"))?;
+    // Backends that do not know `port` ignore it and fall back to the p2pcast-tauri:// link.
     url.query_pairs_mut()
         .append_pair("code_challenge", &code_challenge)
-        .append_pair("host", "tauri");
+        .append_pair("host", "tauri")
+        .append_pair("port", &port.to_string());
     app.opener()
         .open_url(url.as_str(), None::<&str>)
         .map_err(|error| format!("Could not open Discord login: {error}"))
+}
+
+const LOGIN_LISTENER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+const LOGIN_DONE_PAGE: &str = "<!doctype html><html lang=\"pt-BR\"><meta charset=\"utf-8\"><title>Login concluído</title>\
+<body style=\"font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;background:#07111f;color:#edf5ff\">\
+<h1>Login concluído</h1><p>Pode fechar esta aba e voltar ao P2P-Cast.</p></body></html>";
+
+/// One-shot loopback listener for the Discord OAuth code (RFC 8252, section 7.3). The backend sends
+/// the browser to http://127.0.0.1:<port>/auth/callback?code=…, a plain HTTP navigation, so the login
+/// no longer depends on the browser agreeing to launch p2pcast-tauri://. The code alone is useless:
+/// exchanging it needs the PKCE verifier only this app holds.
+fn start_login_listener(app: AppHandle) -> Result<u16, String> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .map_err(|error| format!("Could not open the login listener: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| format!("Could not read the login listener port: {error}"))?
+        .port();
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Could not configure the login listener: {error}"))?;
+
+    thread::spawn(move || {
+        let deadline = Instant::now() + LOGIN_LISTENER_TIMEOUT;
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    if let Some(code) = answer_login_request(stream) {
+                        let _ = app.emit("desktop-auth-code", code);
+                        show_main_window(&app);
+                        return;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(150));
+                }
+                Err(_) => return,
+            }
+        }
+    });
+    Ok(port)
+}
+
+/// Answers one browser request and returns the code when it is the OAuth callback.
+fn answer_login_request(mut stream: TcpStream) -> Option<String> {
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut request_line = String::new();
+    BufReader::new(&stream).read_line(&mut request_line).ok()?;
+
+    // "GET /auth/callback?code=… HTTP/1.1". Codes have the verifier's 43-char base64url shape.
+    let code = request_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|target| target.strip_prefix("/auth/callback?"))
+        .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("code=")))
+        .filter(|code| valid_verifier(code))
+        .map(str::to_string);
+
+    let (status, body) = if code.is_some() { ("200 OK", LOGIN_DONE_PAGE) } else { ("404 Not Found", "") };
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+    );
+    let _ = stream.flush();
+    code
 }
 
 /// Puts the freshly started broadcast link on the clipboard. This runs in Rust because the webview

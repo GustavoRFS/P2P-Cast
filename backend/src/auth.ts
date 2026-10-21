@@ -25,7 +25,7 @@ const CALLBACK_SCHEMES: Record<DesktopHost, string> = {
     tauri: "p2pcast-tauri",
     android: "p2pcast-app",
 };
-type PendingOAuth = { challenge: string; host: DesktopHost; expiresAt: number };
+type PendingOAuth = { challenge: string; host: DesktopHost; loopbackPort: number | null; expiresAt: number };
 type PendingExchange = { user: DiscordProfile; challenge: string; expiresAt: number };
 
 const OAUTH_STATE_TTL_MS = 5 * 60_000;
@@ -119,6 +119,7 @@ export function createAuthRoutes(config: BackendConfig) {
             oauthStates.set(state, {
                 challenge: query.code_challenge,
                 host: query.host ?? "electron",
+                loopbackPort: query.port ?? null,
                 expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
             });
 
@@ -137,6 +138,8 @@ export function createAuthRoutes(config: BackendConfig) {
             query: t.Object({
                 code_challenge: t.String({ minLength: 43, maxLength: 43 }),
                 host: t.Optional(t.Union([t.Literal("electron"), t.Literal("tauri"), t.Literal("android")])),
+                // Desktop apps listening on 127.0.0.1 for the code (RFC 8252 loopback redirect).
+                port: t.Optional(t.Numeric({ minimum: 1024, maximum: 65535 })),
             }),
         })
         .get("/auth/discord/callback", async ({ query, set }) => {
@@ -194,6 +197,14 @@ export function createAuthRoutes(config: BackendConfig) {
                 const code = randomCode();
                 exchangeCodes.set(code, { user, challenge: pendingState.challenge, expiresAt: Date.now() + EXCHANGE_CODE_TTL_MS });
                 const scheme = CALLBACK_SCHEMES[pendingState.host];
+                if (pendingState.loopbackPort !== null) {
+                    // A plain HTTP redirect to the app's one-shot listener: no custom scheme for the
+                    // browser to refuse, and the code still needs the app's PKCE verifier.
+                    set.status = 302;
+                    set.headers.location = `http://127.0.0.1:${pendingState.loopbackPort}/auth/callback?code=${code}`;
+                    set.headers["cache-control"] = "no-store";
+                    return "";
+                }
                 const deepLink = new URL(`${scheme}://auth/callback`);
                 deepLink.searchParams.set("code", code);
                 // Android's auth session intercepts the redirect itself; desktop browsers need the

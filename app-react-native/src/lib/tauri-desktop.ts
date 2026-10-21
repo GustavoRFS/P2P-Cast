@@ -42,9 +42,8 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
     const directVideoErrorListeners = new Map<string, Set<(message: string) => void>>();
     const receivedAuthCodes = new Set<string>();
     let pendingAuthCode: string | null = null;
-    const deliverAuthCode = (rawUrl: string) => {
-        const code = parseAuthCode(rawUrl);
-        if (!code || receivedAuthCodes.has(code)) return;
+    const acceptAuthCode = (code: string | null) => {
+        if (!code || !OAUTH_CODE_PATTERN.test(code) || receivedAuthCodes.has(code)) return;
         receivedAuthCodes.add(code);
         if (receivedAuthCodes.size > 8) {
             const oldest = receivedAuthCodes.values().next().value;
@@ -56,6 +55,13 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
         }
         for (const callback of [...authCallbacks]) callback(code);
     };
+    const deliverAuthCode = (rawUrl: string) => acceptAuthCode(parseAuthCode(rawUrl));
+
+    // The loopback listener started by open_discord_login hands the code over as an event; the
+    // p2pcast-tauri:// deep link stays as the path for backends without loopback support.
+    void listen<string>("desktop-auth-code", event => acceptAuthCode(event.payload)).catch(error => {
+        console.error("Could not subscribe to the login listener:", error);
+    });
 
     const webview2 = (window as Window & {
         chrome?: {
