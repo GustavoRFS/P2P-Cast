@@ -1,0 +1,3 @@
+# The Android runtime fingerprint (EAS Update) hashes the native module's files byte for byte,
+# so they must have the same line endings on every machine; Windows checkouts would add CRLF.
+app-react-native/modules/** text=auto eol=lf

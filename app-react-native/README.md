@@ -52,6 +52,12 @@ npm test               # shared logic (src/lib)
   paths (`~/.android/cmake-3.22.1-ninja-1.13.2`, see the script header): the SDK's ninja 1.10 fails
   on React Native's 260+ character C++ codegen paths. `--eas` builds on EAS instead, signing with
   the same key through a git-ignored `credentials.json` (never commit it, the repository is public).
+- **Build machine**: Android releases are built on the Linux box `ssh ligma` (checkout in
+  `~/dev/P2P-Cast`, toolchain in `~/.p2pcast-build-env`, release key in `~/.android/`), not on the
+  Windows desktop: `source ~/.p2pcast-build-env && npm run release:android -- --no-publish`, then
+  upload the signed APK from `build/android-release/` with `gh release create android-v<version>
+  ... --latest=false`. `.gitattributes` keeps `modules/**` in LF so Windows and Linux compute the same
+  runtime fingerprint and EAS updates from either machine reach the APK.
 - **Desktop**: the Tauri updater installs new versions of the whole app, web export included; see
   "Atualizações do desktop" in the root README.
 - **Web download offer**: `InstallAppModal` suggests the Windows installer or the APK (from the
