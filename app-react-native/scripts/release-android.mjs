@@ -5,6 +5,7 @@
 //   npm run release:android -- --draft
 //   npm run release:android -- --skip-build      reuse android/app/build/outputs/apk/release
 //   npm run release:android -- --eas             build on EAS instead (uses the monthly quota)
+//   npm run release:android -- --no-publish      build and sign only (then upload it with gh)
 //
 // Bump "version" and "android.versionCode" in app.json first: Android only installs an APK over
 // the current one when its versionCode is higher and it is signed with the same key. The key is
@@ -152,6 +153,12 @@ if (flag("--eas")) {
 const verify = spawnSync(`"${apksigner}" verify --print-certs "${apkPath}"`, { shell: true, encoding: "utf8" });
 if (verify.status !== 0) fail(`the APK signature does not verify:\n${verify.stderr}`);
 console.log(verify.stdout.split(/\r?\n/).filter(line => /SHA-256/.test(line)).join("\n"));
+
+// For a build machine without GitHub credentials: the signed APK is published from elsewhere.
+if (flag("--no-publish")) {
+    console.log(`release:android: signed ${apkPath} (not published)`);
+    process.exit(0);
+}
 
 const release = spawnSync("gh", [
     "release", "create", tag, apkPath,
