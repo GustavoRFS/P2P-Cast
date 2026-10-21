@@ -1,3 +1,4 @@
+import { loadToastCorner } from "../../lib/presence-prefs";
 import type { AccountPlatform } from "./types";
 
 function encodeBase64Url(bytes: Uint8Array): string {
@@ -14,6 +15,11 @@ export function createAccountPlatform(): AccountPlatform | null {
     const desktop = typeof window !== "undefined" ? window.p2pcastDesktop : undefined;
     if (!desktop) return null;
 
+    const showLiveToast = (toast: Omit<DesktopLiveToast, "id" | "corner">) => {
+        void desktop.showLiveToast!({ ...toast, id: Date.now(), corner: loadToastCorner() })
+            .catch(error => console.error("Could not show the live notification:", error));
+    };
+
     return {
         getBackendUrl: async () => (await desktop.getConfig()).backendUrl,
         loadSession: () => desktop.getSavedSession(),
@@ -29,6 +35,13 @@ export function createAccountPlatform(): AccountPlatform | null {
         },
         openLogin: challenge => desktop.loginWithDiscord(challenge),
         onAuthCode: listener => desktop.onAuthCallback(listener),
+        // The Steam-style toast window; its click comes back through onNotificationWatch.
+        notifyLive: desktop.showLiveToast
+            ? user => showLiveToast({ userId: user.id, username: user.username, avatar: user.avatar, peerId: user.peerId })
+            : undefined,
+        previewLiveNotification: desktop.showLiveToast
+            ? user => showLiveToast({ userId: user.id, username: user.username, avatar: user.avatar, peerId: "preview", preview: true })
+            : undefined,
         onNotificationWatch: desktop.onNotificationWatch
             ? listener => desktop.onNotificationWatch!(listener)
             : undefined,

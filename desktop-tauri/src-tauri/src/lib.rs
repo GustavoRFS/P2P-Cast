@@ -3,6 +3,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
+    sync::Mutex,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -12,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -518,6 +520,214 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+const TOAST_WINDOW: &str = "toast";
+const TOAST_WIDTH: f64 = 380.0;
+const TOAST_HEIGHT: f64 = 100.0;
+const TOAST_MARGIN: f64 = 16.0;
+const TOAST_CORNERS: [&str; 4] = ["top-right", "bottom-right", "top-left", "bottom-left"];
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveToast {
+    id: u64,
+    user_id: String,
+    username: String,
+    avatar: Option<String>,
+    peer_id: String,
+    corner: String,
+    /// The "Prever notificação" button: same card, but a click only dismisses it.
+    #[serde(default)]
+    preview: bool,
+}
+
+/// The latest toast, kept until the toast page takes it or the toast hides: the first one can
+/// arrive before that page has started listening.
+#[derive(Default)]
+struct PendingLiveToast(Mutex<Option<LiveToast>>);
+
+fn valid_peer_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// Steam-style notification window: borderless, transparent, always on top and never focusable,
+/// so it shows over a game without taking the focus. It is created hidden at startup so its page is
+/// already loaded when the first live starts.
+fn ensure_toast_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(TOAST_WINDOW) {
+        return Ok(window);
+    }
+    // The app's own page (dev server or bundled assets), which renders only the toast for this
+    // query. The main window's URL is still about:blank while setup runs, so it cannot be the base.
+    let mut builder = WebviewWindowBuilder::new(app, TOAST_WINDOW, WebviewUrl::App("?window=toast".into()));
+    // WebView2 refuses a second webview in the same data folder whose browser arguments differ from
+    // the first one's, so the toast copies whatever the main window is configured with.
+    if let Some(arguments) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .and_then(|window| window.additional_browser_args.clone())
+    {
+        builder = builder.additional_browser_args(&arguments);
+    }
+    builder
+        .title("P2P-Cast")
+        .inner_size(TOAST_WIDTH, TOAST_HEIGHT)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focusable(false)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|error| format!("Could not create the notification window: {error}"))
+}
+
+/// The toast's physical rect (x, y, width, height) in a corner of the primary monitor's work area,
+/// clear of the taskbar.
+fn toast_rect(window: &WebviewWindow, corner: &str) -> Result<(i32, i32, i32, i32), String> {
+    let monitor = match window.primary_monitor().map_err(|error| error.to_string())? {
+        Some(monitor) => monitor,
+        None => window
+            .current_monitor()
+            .map_err(|error| error.to_string())?
+            .ok_or("No monitor to show the notification on")?,
+    };
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let width = (TOAST_WIDTH * scale).round() as i32;
+    let height = (TOAST_HEIGHT * scale).round() as i32;
+    let margin = (TOAST_MARGIN * scale).round() as i32;
+    let x = if corner.ends_with("left") {
+        area.position.x + margin
+    } else {
+        area.position.x + area.size.width as i32 - width - margin
+    };
+    let y = if corner.starts_with("top") {
+        area.position.y + margin
+    } else {
+        area.position.y + area.size.height as i32 - height - margin
+    };
+    Ok((x, y, width, height))
+}
+
+/// Shows the toast without activating it. tao's show() uses SW_SHOW (which takes the focus) and
+/// rewrites the extended style, so on Windows this goes straight to Win32: a topmost tool window,
+/// out of the taskbar and Alt+Tab and ignored by tiling window managers such as komorebi.
+#[cfg(windows)]
+fn show_toast_window(window: &WebviewWindow, (x, y, width, height): (i32, i32, i32, i32)) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_SHOWWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    };
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as _;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let wanted = (style | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize) & !(WS_EX_APPWINDOW as isize);
+        if wanted != style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+        }
+        let flags = SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED;
+        if SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags) == 0 {
+            return Err("Could not show the notification".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn show_toast_window(window: &WebviewWindow, (x, y, width, height): (i32, i32, i32, i32)) -> Result<(), String> {
+    window
+        .set_size(tauri::PhysicalSize::new(width as u32, height as u32))
+        .and_then(|_| window.set_position(tauri::PhysicalPosition::new(x, y)))
+        .and_then(|_| window.show())
+        .map_err(|error| format!("Could not show the notification: {error}"))
+}
+
+/// Hidden the same way it is shown, so tao never re-applies its own styles to the toast.
+fn hide_toast_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(TOAST_WINDOW) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                ShowWindow(hwnd.0 as _, SW_HIDE);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window.hide();
+    }
+}
+
+#[tauri::command]
+fn show_live_toast(
+    app: AppHandle,
+    pending: State<'_, PendingLiveToast>,
+    toast: LiveToast,
+) -> Result<(), String> {
+    let valid_avatar = toast
+        .avatar
+        .as_deref()
+        .map_or(true, |avatar| avatar.starts_with("https://") && avatar.len() <= 512);
+    if !TOAST_CORNERS.contains(&toast.corner.as_str())
+        || !valid_peer_id(&toast.peer_id)
+        || toast.username.trim().is_empty()
+        || toast.username.len() > 100
+        || !valid_avatar
+    {
+        return Err("Invalid live notification".to_string());
+    }
+    let window = ensure_toast_window(&app)?;
+    let rect = toast_rect(&window, &toast.corner)?;
+    *pending
+        .0
+        .lock()
+        .map_err(|_| "Notification state is unavailable".to_string())? = Some(toast.clone());
+    app.emit_to(TOAST_WINDOW, "live-toast", &toast)
+        .map_err(|error| format!("Could not send the notification: {error}"))?;
+    // Shown without activation, so the game keeps the keyboard and mouse.
+    show_toast_window(&window, rect)
+}
+
+#[tauri::command]
+fn take_pending_live_toast(pending: State<'_, PendingLiveToast>) -> Option<LiveToast> {
+    pending.0.lock().ok().and_then(|mut slot| slot.take())
+}
+
+#[tauri::command]
+fn hide_live_toast(app: AppHandle, pending: State<'_, PendingLiveToast>) {
+    if let Ok(mut slot) = pending.0.lock() {
+        *slot = None;
+    }
+    hide_toast_window(&app);
+}
+
+/// A click on the toast: bring the app up and open that live.
+#[tauri::command]
+fn open_live_from_toast(app: AppHandle, peer_id: String) -> Result<(), String> {
+    if !valid_peer_id(&peer_id) {
+        return Err("Invalid live".to_string());
+    }
+    hide_toast_window(&app);
+    show_main_window(&app);
+    app.emit_to("main", "open-live", peer_id)
+        .map_err(|error| format!("Could not open the live: {error}"))
+}
+
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Mostrar P2P-Cast", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
@@ -560,6 +770,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(windows_audio::AudioCaptures::default())
         .manage(windows_capture::VideoCaptures::default())
+        .manage(PendingLiveToast::default())
         .invoke_handler(tauri::generate_handler![
             desktop_config,
             list_capture_targets,
@@ -580,6 +791,10 @@ pub fn run() {
             clear_login_verifier,
             open_discord_login,
             copy_share_link,
+            show_live_toast,
+            take_pending_live_toast,
+            hide_live_toast,
+            open_live_from_toast,
         ])
         .on_window_event(|window, event| {
             // Closing the window would end the process and unregister the shortcuts; keep the app
@@ -593,6 +808,9 @@ pub fn run() {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;
             build_tray(app.handle())?;
+            if let Err(error) = ensure_toast_window(app.handle()) {
+                eprintln!("{error}");
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

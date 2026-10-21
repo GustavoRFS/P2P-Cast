@@ -149,6 +149,20 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
             };
         },
         copyShareLink: (link: string) => invoke<void>("copy_share_link", { link }),
+        showLiveToast: (toast: DesktopLiveToast) => invoke<void>("show_live_toast", { toast }),
+        // A click on the toast window comes back as "open-live" with the broadcast id.
+        onNotificationWatch: (callback: (peerId: string) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            void listen<string>("open-live", event => callback(event.payload)).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            return () => {
+                active = false;
+                unlisten?.();
+            };
+        },
         loginWithDiscord: async (codeChallenge: string) => {
             if (!/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) throw new TypeError("Invalid login challenge");
             await invoke("open_discord_login", { codeChallenge });

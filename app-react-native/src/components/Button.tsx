@@ -31,6 +31,7 @@ export function Button({
     variant = "primary",
     size = "md",
     icon,
+    iconPosition = "end",
     loading = false,
     className = "",
     disabled,
@@ -40,6 +41,7 @@ export function Button({
     variant?: Variant;
     size?: Size;
     icon?: ReactNode;
+    iconPosition?: "start" | "end";
     loading?: boolean;
     className?: string;
 }) {
@@ -51,8 +53,9 @@ export function Button({
             {...props}
         >
             {loading && <ActivityIndicator size="small" color={variant === "primary" ? "#07131f" : "#75e5e0"} />}
+            {iconPosition === "start" && icon}
             <Text className={`font-extrabold transition-colors duration-150 ${SIZE[size].label} ${LABEL[variant]}`}>{label}</Text>
-            {icon}
+            {iconPosition === "end" && icon}
         </Pressable>
     );
 }

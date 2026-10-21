@@ -9,7 +9,9 @@ import { useEffect, useState } from "react";
 import { AccountProvider } from "../features/account/AccountProvider";
 import { LiveToasts } from "../features/account/LiveToasts";
 import { BroadcastProvider } from "../features/session/BroadcastProvider";
+import { LiveToastWindow } from "../features/toast/LiveToastWindow";
 import { initializeDesktopBridge } from "../platform/desktop-bridge";
+import { isToastWindow } from "../platform/window-role";
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -26,6 +28,11 @@ const theme = {
 };
 
 export default function RootLayout() {
+    // The desktop notification window shows only the card: no providers, shortcuts or presence socket.
+    return isToastWindow() ? <LiveToastWindow /> : <AppLayout />;
+}
+
+function AppLayout() {
     // Inside Tauri the bridge must exist before the providers read it (it was main.tsx's job).
     const [bridgeReady, setBridgeReady] = useState(false);
 

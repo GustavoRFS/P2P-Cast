@@ -49,6 +49,17 @@ declare global {
         format: "f32le";
     }
 
+    interface DesktopLiveToast {
+        id: number;
+        userId: string;
+        username: string;
+        avatar: string | null;
+        peerId: string;
+        corner: "top-right" | "bottom-right" | "top-left" | "bottom-left";
+        /** From "Prever notificação": a click only dismisses it. */
+        preview?: boolean;
+    }
+
     interface Window {
         p2pcastDesktop?: {
             getWindowSources(): Promise<DesktopWindowSource[]>;
@@ -67,6 +78,7 @@ declare global {
                 capturePicker: "window-list" | "system-window";
             }>;
             copyShareLink?(link: string): Promise<void>;
+            showLiveToast?(toast: DesktopLiveToast): Promise<void>;
             loginWithDiscord(codeChallenge: string): Promise<void>;
             getSavedSession(): Promise<DesktopSavedSession | null>;
             saveSession(session: DesktopSavedSession): Promise<void>;

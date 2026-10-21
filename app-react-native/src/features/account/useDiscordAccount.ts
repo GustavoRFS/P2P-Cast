@@ -1,5 +1,6 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadPresenceStatus, savePresenceStatus, type PresenceStatus } from "../../lib/presence-prefs";
 import type {
     AccountPlatform,
     DiscordAccount,
@@ -45,6 +46,7 @@ function decodePresenceUsers(value: unknown): PresenceUser[] {
             ...user,
             peerId: typeof row.peerId === "string" ? row.peerId : null,
             activity: typeof row.activity === "string" ? row.activity : null,
+            status: row.status === "busy" ? "busy" : "online",
         }];
     });
 }
@@ -72,6 +74,9 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
     const [liveNotifications, setLiveNotifications] = useState<LiveUser[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(Boolean(platform));
+    const [status, setStatusState] = useState<PresenceStatus>(loadPresenceStatus);
+    const [livePeerId, setLivePeerId] = useState<string | null>(null);
+    const statusRef = useRef(status);
     const pendingVerifierRef = useRef<string | null>(null);
     const activeLivePeerRef = useRef<string | null>(null);
     const socketRef = useRef<WebSocket | null>(null);
@@ -188,7 +193,7 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
             socket.addEventListener("open", () => {
                 attempt = 0;
                 socketAuthenticatedRef.current = false;
-                socket?.send(JSON.stringify({ type: "auth", token: session.token }));
+                socket?.send(JSON.stringify({ type: "auth", token: session.token, status: statusRef.current }));
             });
             socket.addEventListener("message", event => {
                 try {
@@ -201,19 +206,22 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
                         return;
                     }
                     if (frame.type === "presence") {
-                        const users = decodePresenceUsers(frame.users);
+                        // You are rendered separately, as the preview of how the others see you.
+                        const users = decodePresenceUsers(frame.users).filter(user => user.id !== session.user.id);
                         // Opening the app is not an event; only a started broadcast notifies.
                         const live = users.filter((user): user is LiveUser => user.peerId !== null);
-                        if (previousLiveUserIds) {
-                            const newlyLive = live.filter(user =>
-                                !previousLiveUserIds!.has(user.id) && user.id !== session.user.id,
-                            );
-                            for (const user of newlyLive) {
-                                setLiveNotifications(current => [
-                                    ...current.filter(item => item.id !== user.id),
-                                    user,
-                                ].slice(-3));
-                                platform.notifyLive?.(user);
+                        if (previousLiveUserIds && statusRef.current !== "busy") {
+                            for (const user of live.filter(candidate => !previousLiveUserIds!.has(candidate.id))) {
+                                // A native notification (desktop toast window, Android) replaces the
+                                // in-app one; only hosts without it fall back to LiveToasts.
+                                if (platform.notifyLive) {
+                                    platform.notifyLive(user);
+                                } else {
+                                    setLiveNotifications(current => [
+                                        ...current.filter(item => item.id !== user.id),
+                                        user,
+                                    ].slice(-3));
+                                }
                             }
                         }
                         previousLiveUserIds = new Set(live.map(user => user.id));
@@ -280,8 +288,21 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
         await platform?.clearVerifier();
     }, [platform, session]);
 
+    const setStatus = useCallback((next: PresenceStatus) => {
+        statusRef.current = next;
+        setStatusState(next);
+        savePresenceStatus(next);
+        // Busy means no notification at all, including the ones already on screen.
+        if (next === "busy") setLiveNotifications([]);
+        const socket = socketRef.current;
+        if (socket?.readyState === WebSocket.OPEN && socketAuthenticatedRef.current) {
+            socket.send(JSON.stringify({ type: "status", status: next }));
+        }
+    }, []);
+
     const setLivePeer = useCallback((peerId: string | null) => {
         activeLivePeerRef.current = peerId;
+        setLivePeerId(peerId);
         const socket = socketRef.current;
         if (socket?.readyState !== WebSocket.OPEN || !socketAuthenticatedRef.current) return;
         socket.send(JSON.stringify(peerId ? { type: "live", peerId } : { type: "offline" }));
@@ -302,7 +323,10 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
 
     return {
         user: session?.user ?? null,
+        self: session ? { ...session.user, peerId: livePeerId, activity: null, status } : null,
         onlineUsers,
+        status,
+        setStatus,
         liveNotifications,
         error,
         loading,
@@ -310,6 +334,9 @@ export function useDiscordAccount(platform: AccountPlatform | null): DiscordAcco
         signOut,
         setLivePeer,
         dismissLiveNotification,
+        previewLiveNotification: platform?.previewLiveNotification && session
+            ? () => platform.previewLiveNotification!(session.user)
+            : undefined,
         watch,
     };
 }

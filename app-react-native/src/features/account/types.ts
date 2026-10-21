@@ -1,3 +1,7 @@
+import type { PresenceStatus } from "../../lib/presence-prefs";
+
+export type { PresenceStatus } from "../../lib/presence-prefs";
+
 export type DiscordProfile = {
     id: string;
     username: string;
@@ -8,6 +12,8 @@ export type DiscordProfile = {
 export type PresenceUser = DiscordProfile & {
     peerId: string | null;
     activity: string | null;
+    /** Others are online or busy; only your own preview can be invisible. */
+    status: PresenceStatus;
 };
 
 export type LiveUser = PresenceUser & { peerId: string };
@@ -35,6 +41,8 @@ export interface AccountPlatform {
     openLogin(codeChallenge: string): Promise<void>;
     onAuthCode(listener: (code: string) => void): () => void;
     notifyLive?(user: LiveUser): void;
+    /** Shows the live notification for yourself, so you can see how it looks and where. */
+    previewLiveNotification?(user: DiscordProfile): void;
     onNotificationWatch?(listener: (peerId: string) => void): () => void;
     /** Opens the presence socket; Android needs to send an Origin the backend accepts. */
     createSocket?(url: string): WebSocket;
@@ -42,7 +50,12 @@ export interface AccountPlatform {
 
 export type DiscordAccount = {
     user: DiscordProfile | null;
+    /** You, as the others see you (first row of the list). */
+    self: PresenceUser | null;
+    /** Everyone else with the app open. */
     onlineUsers: PresenceUser[];
+    status: PresenceStatus;
+    setStatus(status: PresenceStatus): void;
     liveNotifications: LiveUser[];
     error: string | null;
     loading: boolean;
@@ -50,5 +63,7 @@ export type DiscordAccount = {
     signOut(): Promise<void>;
     setLivePeer(peerId: string | null): void;
     dismissLiveNotification(userId: string, peerId: string): void;
+    /** Only where the host has its own notification (the desktop toast window). */
+    previewLiveNotification?: () => void;
     watch(peerId: string): void;
 };
