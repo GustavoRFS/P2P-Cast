@@ -64,8 +64,11 @@ npm test               # shared logic (src/lib)
   outside desktop-only paths; `window.localStorage` comes from `expo-sqlite/localStorage`.
 - **Presence on Android** sends `Origin: p2pcast-app://android`. Backends that set `APP_ORIGINS`
   must include it.
-- **App Links**: `public/.well-known/assetlinks.json` still lists only the old app
-  (`com.p2pcast.android`). Add `com.p2pcast.app` with its release certificate fingerprint once it
-  is signed for release.
+- **App Links**: `public/.well-known/assetlinks.json` lists `com.p2pcast.app` with the release
+  key's certificate (SHA-256 `4C:66:A5:…`) next to the old `com.p2pcast.android`. A new signing
+  key needs a new entry there.
+- **Web deploys**: `npm run deploy:web` exports the web build and publishes it to Vercel
+  (`live.ligmacharl.es`) as a prebuilt static deployment with an SPA fallback. Production always
+  came from the CLI; the project's Git builds fail because they expect a Vite app at the repo root.
 - **NativeWind** uses `darkMode: "class"`: inside the Tauri WebView2 a class toggles on `<html>`,
   which throws with the default media mode.

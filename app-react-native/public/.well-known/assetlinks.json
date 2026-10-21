@@ -3,6 +3,16 @@
         "relation": ["delegate_permission/common.handle_all_urls"],
         "target": {
             "namespace": "android_app",
+            "package_name": "com.p2pcast.app",
+            "sha256_cert_fingerprints": [
+                "4C:66:A5:04:66:BD:39:5F:F8:F7:E1:B8:E1:3C:E8:27:B8:F3:60:98:BF:0F:EB:9D:DF:8A:60:A7:38:D5:E8:E4"
+            ]
+        }
+    },
+    {
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
             "package_name": "com.p2pcast.android",
             "sha256_cert_fingerprints": [
                 "96:9C:CC:74:82:98:FD:BC:EC:DD:38:88:7B:18:C7:64:30:B5:BE:9D:40:C9:35:38:C1:C2:A3:CC:FA:96:21:3C"
