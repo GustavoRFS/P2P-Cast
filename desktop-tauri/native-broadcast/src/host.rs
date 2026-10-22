@@ -8,6 +8,7 @@ use crate::signaling::{Inbound, Outbound};
 use crate::video::EncodedFrame;
 use crate::{BroadcastEvent, EventSink};
 use bytes::{Bytes, BytesMut};
+use rtc::ice::mdns::MulticastDnsMode;
 use rtc::interceptor::{Attribute, Interceptor, Packet, Slot, StreamInfo, TaggedPacket};
 use rtc::media_stream::MediaStreamTrack;
 use rtc::peer_connection::configuration::interceptor_registry::{register_default_interceptors, Registry};
@@ -357,6 +358,9 @@ impl Host {
         let handler = Arc::new(LinkHandler { host: Arc::downgrade(self), connection_id: connection_id.to_string() });
         let settings = SettingEngineBuilder::new()
             .with_ice_timeouts(Some(ICE_DISCONNECTED_TIMEOUT), Some(ICE_FAILED_TIMEOUT), Some(ICE_KEEPALIVE))
+            // No mDNS socket (port 5353) per connection: on Windows it is often taken, and a failed
+            // bind fails the connection. Viewers still reach us through our host IPs and STUN.
+            .with_multicast_dns_mode(MulticastDnsMode::Disabled)
             .build();
         let pc = PeerConnectionBuilder::new()
             .with_configuration(config)

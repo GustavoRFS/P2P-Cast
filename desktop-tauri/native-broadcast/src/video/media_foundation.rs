@@ -262,12 +262,25 @@ impl MediaFoundationEncoder {
             set_codec_value(api, &CODECAPI_AVEncMPVGOPSize, VARIANT::from(fps * 10));
         }
 
-        let output_type = video_type(&MFVideoFormat_H264, width, height, fps)?;
-        output_type.SetUINT32(&MF_MT_AVG_BITRATE, bitrate).map_err(hr("bitrate"))?;
-        output_type
-            .SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base.0 as u32)
-            .map_err(hr("profile"))?;
-        transform.SetOutputType(0, &output_type, 0).map_err(hr("SetOutputType"))?;
+        // Baseline is what every viewer negotiates; an encoder without it gets the closest profile
+        // it accepts (decoders handle them all) rather than losing the GPU.
+        let mut last_error = String::new();
+        let mut accepted = false;
+        for profile in [eAVEncH264VProfile_Base, eAVEncH264VProfile_ConstrainedBase, eAVEncH264VProfile_Main] {
+            let output_type = video_type(&MFVideoFormat_H264, width, height, fps)?;
+            output_type.SetUINT32(&MF_MT_AVG_BITRATE, bitrate).map_err(hr("bitrate"))?;
+            output_type.SetUINT32(&MF_MT_MPEG2_PROFILE, profile.0 as u32).map_err(hr("profile"))?;
+            match transform.SetOutputType(0, &output_type, 0) {
+                Ok(()) => {
+                    accepted = true;
+                    break;
+                }
+                Err(error) => last_error = format!("SetOutputType: {error}"),
+            }
+        }
+        if !accepted {
+            return Err(last_error);
+        }
         let input_type = video_type(&MFVideoFormat_NV12, width, height, fps)?;
         transform.SetInputType(0, &input_type, 0).map_err(hr("SetInputType"))?;
 
