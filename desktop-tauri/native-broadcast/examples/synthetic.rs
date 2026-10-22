@@ -1,7 +1,8 @@
 //! A test broadcaster with a synthetic picture (moving bars) and a 440 Hz tone, encoded with
-//! openh264 so it runs anywhere. Prints one JSON line per event; reads `chat <text>` and `quit`
-//! from stdin. Environment: P2PCAST_ID (broadcast id), P2PCAST_STILL_AFTER (seconds of motion
-//! before the picture freezes, the way a WGC capture of an unchanging window goes quiet).
+//! openh264 so it runs anywhere. Prints one JSON line per event; reads `chat <text>`,
+//! `resize <max width> <max height>` (a profile switch) and `quit` from stdin. Environment:
+//! P2PCAST_ID (broadcast id), P2PCAST_STILL_AFTER (seconds of motion before the picture freezes,
+//! the way a WGC capture of an unchanging window goes quiet).
 //!
 //!     cargo run --release --example synthetic
 
@@ -24,10 +25,9 @@ async fn main() {
     env_logger::init();
     let still_after = std::env::var("P2PCAST_STILL_AFTER").ok().and_then(|value| value.parse::<u64>().ok());
     let events = Arc::new(|event: BroadcastEvent| print(serde_json::json!({ "event": event })));
-    let config = BroadcastConfig::p2pcast(
-        std::env::var("P2PCAST_ID").ok(),
-        VideoSettings { max_width: 1920, max_height: 1080, fps: FPS, bitrate: Some(3_000_000), encoder: EncoderPreference::Software },
-    );
+    let video_settings =
+        VideoSettings { max_width: 1920, max_height: 1080, fps: FPS, bitrate: Some(3_000_000), encoder: EncoderPreference::Software };
+    let config = BroadcastConfig::p2pcast(std::env::var("P2PCAST_ID").ok(), video_settings.clone());
     let broadcast = match NativeBroadcast::start(config, events).await {
         Ok(broadcast) => Arc::new(broadcast),
         Err(error) => {
@@ -101,6 +101,11 @@ async fn main() {
     while let Some(line) = line_rx.recv().await {
         if let Some(text) = line.strip_prefix("chat ") {
             broadcast.send_chat(&ChatMessage::new(text.to_string(), "Transmissor".to_string(), true));
+        } else if let Some(size) = line.strip_prefix("resize ") {
+            let mut parts = size.split_whitespace().filter_map(|part| part.parse::<u32>().ok());
+            if let (Some(max_width), Some(max_height)) = (parts.next(), parts.next()) {
+                broadcast.update_video_settings(VideoSettings { max_width, max_height, ..video_settings.clone() });
+            }
         } else if line.trim() == "quit" {
             break;
         }

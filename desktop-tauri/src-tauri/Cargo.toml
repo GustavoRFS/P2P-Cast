@@ -1,6 +1,6 @@
 [package]
 name = "p2p-cast-desktop-tauri"
-version = "0.4.1"
+version = "0.4.2"
 description = "P2P-Cast desktop host built with Tauri"
 authors = ["P2P-Cast"]
 edition = "2021"

@@ -275,6 +275,7 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
         startNativeBroadcast: (request: DesktopNativeBroadcastRequest) =>
             invoke<{ peerId: string }>("start_native_broadcast", { request }),
         stopNativeBroadcast: () => invoke<void>("stop_native_broadcast"),
+        switchNativeCapture: (request: DesktopNativeCaptureSwitch) => invoke<string | null>("switch_native_capture", { request }),
         sendNativeChat: (message: DesktopChatMessage) => invoke<void>("send_native_chat", { message }),
         setNativeAudioMuted: (muted: boolean) => invoke<void>("set_native_audio_muted", { muted }),
         onNativeBroadcastEvent: (callback: (event: DesktopNativeBroadcastEvent) => void) => {

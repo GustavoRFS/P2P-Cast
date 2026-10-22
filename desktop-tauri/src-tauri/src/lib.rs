@@ -842,6 +842,7 @@ pub fn run() {
             stop_direct_video_capture,
             native_broadcast::start_native_broadcast,
             native_broadcast::stop_native_broadcast,
+            native_broadcast::switch_native_capture,
             native_broadcast::send_native_chat,
             native_broadcast::set_native_audio_muted,
             get_saved_session,

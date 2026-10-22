@@ -3370,7 +3370,7 @@ dependencies = [
 
 [[package]]
 name = "p2p-cast-desktop-tauri"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "keyring",
  "log",

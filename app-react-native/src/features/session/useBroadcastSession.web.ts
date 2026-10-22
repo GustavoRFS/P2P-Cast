@@ -14,6 +14,7 @@ import {
     type CaptureTrackSource,
 } from "../../lib/capture";
 import { recordCaptureFailure } from "../../lib/capture-failure-log";
+import { showDesktopNotice } from "../../lib/desktop-notice";
 import {
     buildChatMessage,
     CHAT_CONNECTION_ROLE,
@@ -41,6 +42,15 @@ import type { BroadcastSession, NativeSenderInfo } from "./types";
 import { useChatCore } from "./useChatCore";
 
 const MAX_MEDIA_CONNECTIONS_PER_SESSION = 2;
+
+// During a live, a shortcut acts on its second press within this window: the first only says what
+// the next one will do. A key alone (F9) can be hit by accident in a game.
+const CONFIRM_WINDOW_MS = 3000;
+
+// Profile names in notices, which have little room.
+function shortName(name: string): string {
+    return name.length > 40 ? `${name.slice(0, 39)}…` : name;
+}
 
 const SIGNALING_LOST: AppError = {
     title: "Sinalização desconectada",
@@ -102,6 +112,14 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
     const nativeRef = useRef(false);
     // Bumped by stop(), so a native start that resolves after the live was ended is undone.
     const stopCountRef = useRef(0);
+    // The profile the live was started with or last switched to.
+    const [activeProfile, setActiveProfile] = useState<ShortcutProfile | null>(null);
+    const activeProfileRef = useRef<ShortcutProfile | null>(null);
+    // A first press during a live, waiting for the second one.
+    const pendingPressRef = useRef<{ profileId: string; at: number } | null>(null);
+    const switchingRef = useRef(false);
+    // A live started from a shortcut is announced in a notice once it is up, or failed.
+    const startNoticeRef = useRef<ShortcutProfile | null>(null);
     const chat = useChatCore();
     const { pushSelf, pushIncoming, reset: resetChat } = chat;
     const localStreamsRef = useRef<CaptureStreams>(EMPTY_STREAMS);
@@ -163,6 +181,9 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
     const stop = useCallback(() => {
         setLivePeer?.(null);
         stopCountRef.current += 1;
+        activeProfileRef.current = null;
+        setActiveProfile(null);
+        pendingPressRef.current = null;
         if (nativeRef.current) {
             nativeRef.current = false;
             void window.p2pcastDesktop?.stopNativeBroadcast?.().catch(() => undefined);
@@ -388,8 +409,10 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
             peer.on("error", peerError => {
                 if (peerRef.current !== peer) return;
                 stop();
-                setError(getPeerError(peerError));
+                const peerAppError = getPeerError(peerError);
+                setError(peerAppError);
                 setMode("error");
+                if (desktopMode) showDesktopNotice("A transmissão parou", peerAppError.message);
             });
 
             peer.on("disconnected", () => {
@@ -409,6 +432,144 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
         }
     }, [desktopConfig, desktopMode, pushIncoming, setLivePeer, stop, updateViewerCount]);
 
+    const resolveProfileTargets = useCallback(async (profile: ShortcutProfile) => {
+        const video = await resolveDesktopCaptureTarget(profile.videoTarget.selector);
+        // Monitor profiles take the system audio; window profiles need that window running.
+        const systemAudio = profile.audioSourceSelector === SYSTEM_AUDIO_SOURCE;
+        const audio = systemAudio ? null : await resolveDesktopCaptureTarget(profile.audioSourceSelector);
+        if (!video || (!systemAudio && (!audio || audio.kind !== "window"))) return null;
+        return { videoId: video.id, audioId: systemAudio ? SYSTEM_AUDIO_SOURCE : audio!.id };
+    }, []);
+
+    /** Starts a live with a profile: from its shortcut, or from the button on its card. */
+    const startProfile = useCallback(async (profile: ShortcutProfile, fromShortcut: boolean) => {
+        if (modeRef.current === "starting" || modeRef.current === "broadcasting") return;
+        try {
+            const targets = await resolveProfileTargets(profile);
+            if (!targets) {
+                setError({ title: "Programa indisponível", message: "Abra novamente o programa de vídeo e áudio selecionado e atualize os alvos." });
+                if (fromShortcut) showDesktopNotice("A live não começou", `${shortName(profile.name)}: abra o programa e tente de novo.`);
+                return;
+            }
+            activeProfileRef.current = profile;
+            setActiveProfile(profile);
+            startNoticeRef.current = fromShortcut ? profile : null;
+            await startBroadcast(profile.settings, targets.videoId, profile, targets.audioId);
+        } catch (captureError) {
+            recordCaptureFailure("shortcutProfile", captureError);
+            setError(getMediaError(captureError, "screen"));
+            setMode("error");
+        }
+    }, [resolveProfileTargets, startBroadcast]);
+
+    useEffect(() => {
+        const profile = startNoticeRef.current;
+        if (!profile || (mode !== "broadcasting" && mode !== "error")) return;
+        startNoticeRef.current = null;
+        if (mode === "broadcasting") showDesktopNotice("Live iniciada", `Transmitindo: ${shortName(profile.name)}`);
+        else showDesktopNotice("A live não começou", error?.message ?? "Tente de novo pelo app.");
+    }, [error, mode]);
+
+    // The webview pipeline: every viewer's connection gets the new tracks; nobody reconnects.
+    const replaceLiveStream = useCallback((stream: MediaStream, nextSettings: CaptureSettings) => {
+        const previous = localStreamsRef.current;
+        const videoTrack = stream.getVideoTracks()[0] ?? null;
+        const audioTrack = stream.getAudioTracks()[0] ?? null;
+        setCaptureAudioEnabled([stream], !audioMuted);
+        callsRef.current.forEach(call => {
+            call.peerConnection?.getSenders().forEach(sender => {
+                if (sender.track?.kind === "video") void sender.replaceTrack(videoTrack).catch(() => undefined);
+                if (sender.track?.kind === "audio") void sender.replaceTrack(audioTrack).catch(() => undefined);
+            });
+            void applyVideoBitrate(call, nextSettings.bitrate).catch(() => undefined);
+        });
+        videoTrack?.addEventListener("ended", stop, { once: true });
+        const next: CaptureStreams = { ...EMPTY_STREAMS, screen: stream };
+        localStreamsRef.current = next;
+        setLocalStreams(next);
+        stopCaptureStreams(previous);
+    }, [audioMuted, stop]);
+
+    /** Moves the running live to another profile's capture and settings, without ending it. */
+    const switchProfile = useCallback(async (profile: ShortcutProfile) => {
+        const name = shortName(profile.name);
+        let audioWarning: string | null = null;
+        try {
+            const targets = await resolveProfileTargets(profile);
+            if (!targets) {
+                showDesktopNotice("Não deu para trocar", `${name}: abra o programa e tente de novo.`);
+                return;
+            }
+            if (nativeRef.current) {
+                if (profile.captureMethod !== "direct" || !window.p2pcastDesktop?.switchNativeCapture) {
+                    showDesktopNotice("Não deu para trocar", `${name} usa o seletor do Windows: encerre a live para usar este atalho.`);
+                    return;
+                }
+                const resolution = RESOLUTION_OPTIONS.find(option => option.value === profile.settings.resolution);
+                audioWarning = await window.p2pcastDesktop.switchNativeCapture({
+                    videoSourceId: targets.videoId,
+                    audioSourceId: profile.settings.audio ? targets.audioId : null,
+                    fps: profile.settings.fps,
+                    cursor: profile.settings.cursor,
+                    maxWidth: resolution?.width ?? 0,
+                    maxHeight: resolution?.height ?? 0,
+                    bitrate: profile.settings.bitrate,
+                });
+            } else {
+                if (!desktopConfig) return;
+                const stream = await captureDesktopWindow(targets.videoId, profile.settings, desktopConfig, {
+                    captureMethod: profile.captureMethod,
+                    targetKind: profile.videoTarget.kind,
+                    audioSourceId: targets.audioId,
+                });
+                replaceLiveStream(stream, profile.settings);
+            }
+            activeProfileRef.current = profile;
+            setActiveProfile(profile);
+            setSettings(profile.settings);
+            showDesktopNotice("Configuração alterada", `Agora transmitindo: ${name}${audioWarning ? ", mas sem áudio" : ""}`);
+        } catch (switchError) {
+            recordCaptureFailure("switchProfile", switchError);
+            const current = activeProfileRef.current ? shortName(activeProfileRef.current.name) : "a configuração atual";
+            showDesktopNotice("Não deu para trocar", `A live continua com ${current}.`);
+        }
+    }, [desktopConfig, replaceLiveStream, resolveProfileTargets]);
+
+    const handleShortcutPress = useCallback((profileId: string) => {
+        const profile = shortcutProfilesRef.current.find(item => item.id === profileId);
+        if (!profile || switchingRef.current || modeRef.current === "starting") return;
+        if (modeRef.current !== "broadcasting") {
+            pendingPressRef.current = null;
+            void startProfile(profile, true);
+            return;
+        }
+        const now = Date.now();
+        const pending = pendingPressRef.current;
+        const current = activeProfileRef.current?.id === profile.id;
+        const name = shortName(profile.name);
+        if (pending?.profileId === profile.id && now - pending.at <= CONFIRM_WINDOW_MS) {
+            pendingPressRef.current = null;
+            if (current) {
+                stop();
+                showDesktopNotice("Live encerrada", `${name}: você parou de transmitir.`);
+            } else {
+                switchingRef.current = true;
+                void switchProfile(profile).finally(() => {
+                    switchingRef.current = false;
+                });
+            }
+            return;
+        }
+        pendingPressRef.current = { profileId: profile.id, at: now };
+        if (current) showDesktopNotice("Encerrar a live?", "Aperte o atalho de novo para encerrar.");
+        else showDesktopNotice(`Trocar para ${name}?`, "Aperte o atalho de novo para trocar sem encerrar a live.");
+    }, [startProfile, stop, switchProfile]);
+
+    const shortcutProfilesRef = useRef(shortcutProfiles);
+    shortcutProfilesRef.current = shortcutProfiles;
+    const shortcutPressRef = useRef(handleShortcutPress);
+    shortcutPressRef.current = handleShortcutPress;
+
     // Global shortcuts: each profile starts its own capture, with its own settings.
     useEffect(() => {
         if (!desktopMode || !window.p2pcastDesktop?.registerShortcutProfiles) return;
@@ -420,41 +581,19 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
             if (failed.length) {
                 setError({
                     title: "Alguns atalhos não foram registrados",
-                    message: `${failed.length} atalho(s) estão duplicados ou indisponíveis no Windows. Edite o perfil e escolha outra combinação.`,
+                    message: `${failed.length} atalho(s) estão duplicados ou indisponíveis no Windows. Edite o perfil e escolha outra tecla.`,
                 });
             }
         }).catch(() => {
             if (active && shortcutProfiles.length) setError({ title: "Não foi possível registrar os atalhos", message: "Reabra as configurações dos atalhos e tente novamente." });
         });
-        const removeListener = window.p2pcastDesktop.onShortcutProfile?.(profileId => {
-            const profile = shortcutProfiles.find(item => item.id === profileId);
-            if (!profile) return;
-            if (modeRef.current !== "idle" && modeRef.current !== "error") {
-                setError({ title: "Já existe uma transmissão ativa", message: "Encerre a transmissão atual antes de iniciar outro perfil." });
-                return;
-            }
-            void (async () => {
-                const video = await resolveDesktopCaptureTarget(profile.videoTarget.selector);
-                // Monitor profiles take the system audio; window profiles need that window running.
-                const systemAudio = profile.audioSourceSelector === SYSTEM_AUDIO_SOURCE;
-                const audio = systemAudio ? null : await resolveDesktopCaptureTarget(profile.audioSourceSelector);
-                if (!video || (!systemAudio && (!audio || audio.kind !== "window"))) {
-                    setError({ title: "Programa indisponível", message: "Abra novamente o programa de vídeo e áudio selecionado e atualize os alvos." });
-                    return;
-                }
-                await startBroadcast(profile.settings, video.id, profile, systemAudio ? SYSTEM_AUDIO_SOURCE : audio!.id);
-            })().catch(captureError => {
-                recordCaptureFailure("shortcutProfile", captureError);
-                setError(getMediaError(captureError, "screen"));
-                setMode("error");
-            });
-        });
+        const removeListener = window.p2pcastDesktop.onShortcutProfile?.(profileId => shortcutPressRef.current(profileId));
         return () => {
             active = false;
             removeListener?.();
             void window.p2pcastDesktop?.registerShortcutProfiles?.([]);
         };
-    }, [desktopMode, shortcutProfiles, startBroadcast]);
+    }, [desktopMode, shortcutProfiles]);
 
     // The native capture helpers report failures as window events; never fall back silently.
     useEffect(() => {
@@ -468,6 +607,7 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                 message: `${message} A transmissão foi encerrada para evitar trocar para o áudio global do sistema.`,
             });
             setMode("error");
+            showDesktopNotice("A transmissão parou", "A captura do áudio foi interrompida.");
         };
         const onVideoError = (event: Event) => {
             const message = event instanceof CustomEvent && typeof event.detail === "string"
@@ -476,6 +616,7 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
             stop();
             setError({ title: "Captura de vídeo interrompida", message: `${message} A transmissão foi encerrada.` });
             setMode("error");
+            showDesktopNotice("A transmissão parou", "A captura do vídeo foi interrompida.");
         };
         window.addEventListener("p2pcast:application-audio-error", onAudioError);
         window.addEventListener("p2pcast:direct-video-error", onVideoError);
@@ -512,6 +653,7 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                     stop();
                     setError({ title: "A transmissão parou", message: event.message });
                     setMode("error");
+                    showDesktopNotice("A transmissão parou", event.message);
                     break;
             }
         });
@@ -616,6 +758,11 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                 refreshTargets: () => void refreshTargets(),
                 shortcutProfiles,
                 setShortcutProfiles,
+                activeProfile,
+                startProfile: (profileId: string) => {
+                    const profile = shortcutProfiles.find(item => item.id === profileId);
+                    if (profile) void startProfile(profile, false);
+                },
             }
             : null,
         nativeSender,

@@ -103,7 +103,14 @@ Configure `backendUrl` e `webUrl` em `desktop-tauri/config.json` durante o desen
 
 Para gerar um instalador no sistema atual, use `npm run build`; para escolher um formato, use `npm run build:windows`, `npm run build:macos` ou `npm run build:linux` dentro de `desktop-tauri/`. O Tauri usa o WebView do sistema operacional (WebView2 no Windows, WKWebView no macOS e WebKitGTK no Linux); por isso, compare tanto o tamanho do instalador quanto o tamanho instalado. O bootstrapper do WebView2 pode instalar um runtime externo no Windows.
 
-O Tauri lista janelas e monitores e oferece dois métodos nos perfis de atalho: captura direta por Windows Graphics Capture (WGC), que usa o alvo salvo, e o seletor do Windows, que pede uma escolha a cada início. A captura WGC está disponível quando o helper nativo foi compilado e incluído no pacote; requer Windows 10 versão 1903 ou posterior. Os perfis guardam o alvo de vídeo, o programa de áudio e a combinação global; o áudio usa o helper WASAPI e nunca usa loopback global.
+O Tauri lista janelas e monitores e oferece dois métodos nos perfis de atalho: captura direta por Windows Graphics Capture (WGC), que usa o alvo salvo, e o seletor do Windows, que pede uma escolha a cada início. A captura WGC está disponível quando o helper nativo foi compilado e incluído no pacote; requer Windows 10 versão 1903 ou posterior. Os perfis guardam o alvo de vídeo, o programa de áudio e o atalho global; o áudio usa o helper WASAPI e nunca usa loopback global.
+
+Os perfis de atalho podem ser editados, e cada card tem um botão "Iniciar live" que faz o mesmo que o atalho. O atalho pode ser uma tecla sozinha (F9) ou uma combinação (Ctrl+Shift+F9); uma tecla de digitação sozinha (uma letra, Espaço, Enter) ganha um aviso, porque fica presa ao app em todo o Windows. Com a live no ar, o atalho só age no segundo aperto em até 3 s; o primeiro mostra um aviso dizendo o que o próximo fará:
+
+- **Atalho do perfil atual:** encerra a live.
+- **Atalho de outro perfil:** troca a captura e as configurações sem encerrar. No envio nativo, o capturador novo começa antes de o antigo parar, e quem assiste recebe um quadro-chave no tamanho novo, sem reconectar. No caminho pelo WebView, as faixas de cada conexão são substituídas.
+
+Iniciar pelo atalho, encerrar, trocar e uma parada inesperada geram avisos só para quem transmite, na janela de notificação e no canto escolhido no app. Os outros usuários continuam recebendo aviso só quando uma live começa.
 
 ### Envio nativo
 

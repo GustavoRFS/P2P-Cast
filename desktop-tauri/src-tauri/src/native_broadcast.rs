@@ -18,6 +18,7 @@ struct Running {
     broadcast: Arc<NativeBroadcast>,
     video: windows_capture::NativeVideoCapture,
     audio: Option<windows_audio::NativeAudioCapture>,
+    events: EventSink,
 }
 
 impl Running {
@@ -69,6 +70,11 @@ pub struct StartNativeBroadcast {
     software_encoder: bool,
 }
 
+fn on_error(events: &EventSink) -> Box<dyn Fn(String) + Send> {
+    let events = events.clone();
+    Box::new(move |message| events(BroadcastEvent::Fatal { message }))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeBroadcastStarted {
@@ -116,10 +122,6 @@ pub async fn start_native_broadcast(
             return Err(error);
         }
     };
-    let on_error = |events: &EventSink| -> Box<dyn Fn(String) + Send> {
-        let events = events.clone();
-        Box::new(move |message| events(BroadcastEvent::Fatal { message }))
-    };
 
     let settings = windows_capture::VideoCaptureSettings::new(fps, request.cursor);
     let video = match windows_capture::start_native(
@@ -141,7 +143,7 @@ pub async fn start_native_broadcast(
             Ok(audio) => Some(audio),
             Err(error) => {
                 log::error!("native audio capture did not start: {error}");
-                let mut running = Running { broadcast, video, audio: None };
+                let mut running = Running { broadcast, video, audio: None, events };
                 running.stop();
                 return Err(error);
             }
@@ -152,13 +154,99 @@ pub async fn start_native_broadcast(
     let peer_id = broadcast.peer_id().to_string();
     log::info!("native broadcast live as {peer_id}");
     match state.0.lock() {
-        Ok(mut current) => *current = Some(Running { broadcast, video, audio }),
+        Ok(mut current) => *current = Some(Running { broadcast, video, audio, events }),
         Err(_) => {
-            Running { broadcast, video, audio }.stop();
+            Running { broadcast, video, audio, events }.stop();
             return Err("O estado da transmissão está indisponível.".to_string());
         }
     }
     Ok(NativeBroadcastStarted { peer_id })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchNativeCapture {
+    video_source_id: String,
+    audio_source_id: Option<String>,
+    fps: u32,
+    cursor: String,
+    max_width: u32,
+    max_height: u32,
+    bitrate: Option<u32>,
+}
+
+/// Moves the running live to another capture and settings (another shortcut profile). The new
+/// picture starts before the old one stops, so a capture that cannot start leaves the live as it
+/// was; viewers stay connected throughout. A switch whose new audio did not start still happened:
+/// it resolves with that warning.
+#[tauri::command]
+pub async fn switch_native_capture(
+    app: AppHandle,
+    state: State<'_, NativeBroadcasts>,
+    request: SwitchNativeCapture,
+) -> Result<Option<String>, String> {
+    let running = state
+        .0
+        .lock()
+        .map_err(|_| "O estado da transmissão está indisponível.".to_string())?
+        .take()
+        .ok_or_else(|| "Nenhuma transmissão ativa.".to_string())?;
+    log::info!(
+        "switching native capture to video {}, audio {:?}, {} fps, max {}x{}, bitrate {:?}",
+        request.video_source_id,
+        request.audio_source_id,
+        request.fps,
+        request.max_width,
+        request.max_height,
+        request.bitrate
+    );
+    let (running, outcome) = tauri::async_runtime::spawn_blocking(move || {
+        let mut running = running;
+        let fps = request.fps.clamp(15, MAX_FPS);
+        let settings = windows_capture::VideoCaptureSettings::new(fps, request.cursor);
+        let video = match windows_capture::start_native(
+            &app,
+            &request.video_source_id,
+            &settings,
+            running.broadcast.video_input(),
+            on_error(&running.events),
+        ) {
+            Ok(video) => video,
+            Err(error) => {
+                log::error!("the new capture did not start, keeping the current one: {error}");
+                return (running, Err(error));
+            }
+        };
+        running.broadcast.update_video_settings(VideoSettings {
+            max_width: request.max_width,
+            max_height: request.max_height,
+            fps,
+            bitrate: request.bitrate,
+            encoder: EncoderPreference::Auto,
+        });
+        let mut previous = std::mem::replace(&mut running.video, video);
+        previous.stop();
+        if let Some(mut audio) = running.audio.take() {
+            audio.stop();
+        }
+        let mut outcome = Ok(None);
+        if let Some(source) = request.audio_source_id.as_deref() {
+            match windows_audio::start_native(&app, source, running.broadcast.audio_input(), on_error(&running.events)) {
+                Ok(audio) => running.audio = Some(audio),
+                Err(error) => {
+                    log::error!("the new audio capture did not start: {error}");
+                    outcome = Ok(Some(error));
+                }
+            }
+        }
+        (running, outcome)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    if let Ok(mut current) = state.0.lock() {
+        *current = Some(running);
+    }
+    outcome
 }
 
 #[tauri::command]

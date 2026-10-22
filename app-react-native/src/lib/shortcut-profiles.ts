@@ -44,10 +44,11 @@ function getBrowserStorage(): StorageLike | null {
     }
 }
 
-function validShortcut(value: unknown): value is string {
+/** A key alone (F9) or a combination (Ctrl+Shift+F9). */
+export function isValidShortcut(value: unknown): value is string {
     if (typeof value !== "string" || value.length > 80) return false;
     const parts = value.split("+").map(part => part.trim());
-    if (parts.length < 2 || parts.some(part => !part)) return false;
+    if (parts.length < 1 || parts.some(part => !part)) return false;
 
     const modifiers = parts.slice(0, -1);
     const key = parts.at(-1)!;
@@ -87,7 +88,7 @@ export function isShortcutProfile(value: unknown): value is ShortcutProfile {
         && typeof profile.audioSourceSelector === "string"
         && profile.audioSourceSelector.length > 0
         && profile.audioSourceSelector.length <= 2048
-        && validShortcut(profile.shortcut)
+        && isValidShortcut(profile.shortcut)
         && validSettings(profile.settings);
 }
 
@@ -98,6 +99,30 @@ export function canonicalizeShortcut(shortcut: string): string {
         .map(part => MODIFIERS.find(modifier => modifier.toLowerCase() === part.toLowerCase()) ?? part)
         .sort((left, right) => MODIFIERS.indexOf(left as (typeof MODIFIERS)[number]) - MODIFIERS.indexOf(right as (typeof MODIFIERS)[number]));
     return [...modifiers, /^[a-z]$/i.test(key) ? key.toUpperCase() : key].join("+");
+}
+
+/**
+ * A key that types something on its own: as a global shortcut without modifiers, it stops working
+ * everywhere else while the app is open.
+ */
+export function isTypingKeyAlone(shortcut: string): boolean {
+    const parts = shortcut.split("+").map(part => part.trim());
+    return parts.length === 1 && (/^[A-Z0-9]$/i.test(parts[0]) || ["Space", "Tab", "Enter", "Backspace", "Delete"].includes(parts[0]));
+}
+
+export function sameShortcut(left: string, right: string): boolean {
+    return canonicalizeShortcut(left).toLowerCase() === canonicalizeShortcut(right).toLowerCase();
+}
+
+/** A readable name for a saved target whose program is not running now. */
+export function describeTargetSelector(selector: string): string {
+    if (selector.startsWith("monitor:")) {
+        const device = selector.slice("monitor:".length).replace(/^\\\\\.\\/, "");
+        return `Tela inteira (${device || "monitor"})`;
+    }
+    const [path, title] = selector.slice("window:".length).split("#");
+    const executable = path?.split("\\").pop() ?? "";
+    return [title?.trim(), executable].filter(Boolean).join(" · ") || "Programa salvo";
 }
 
 export function findDuplicateShortcutIds(profiles: ShortcutProfile[]): Set<string> {

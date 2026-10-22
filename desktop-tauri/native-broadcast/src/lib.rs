@@ -188,6 +188,12 @@ impl NativeBroadcast {
         self.audio_input.clone()
     }
 
+    /// The live switched to another profile: its resolution bound, frame rate and bitrate apply
+    /// from the next frame; viewers stay connected and get a keyframe.
+    pub fn update_video_settings(&self, settings: VideoSettings) {
+        self.video_input.update_settings(settings);
+    }
+
     pub fn set_audio_muted(&self, muted: bool) {
         self.audio_input.set_muted(muted);
     }

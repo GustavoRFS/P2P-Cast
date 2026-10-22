@@ -43,6 +43,10 @@ export type DesktopState = {
     refreshTargets(): void;
     shortcutProfiles: ShortcutProfile[];
     setShortcutProfiles(profiles: ShortcutProfile[]): void;
+    /** The profile the live was started with or last switched to. */
+    activeProfile: ShortcutProfile | null;
+    /** Starts a live with a profile, as its shortcut would (the button on its card). */
+    startProfile(profileId: string): void;
 };
 
 export type BroadcastSession = {

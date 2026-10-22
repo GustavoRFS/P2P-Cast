@@ -46,7 +46,9 @@ export function BroadcastRoom() {
                 <Panel className="lg:flex-[3]">
                     <View className="flex-row flex-wrap items-center justify-between gap-2">
                         <Text className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                            prévia local · {formatCaptureSettings(broadcast.settings)}
+                            {nativeSender ? "envio nativo" : "prévia local"}
+                            {broadcast.desktop?.activeProfile ? ` · ${broadcast.desktop.activeProfile.name}` : ""}
+                            {" · "}{formatCaptureSettings(broadcast.settings)}
                         </Text>
                         <Text className="text-[11px] font-extrabold text-success">
                             ◉ {broadcast.viewerCount} {broadcast.viewerCount === 1 ? "pessoa assistindo" : "pessoas assistindo"}

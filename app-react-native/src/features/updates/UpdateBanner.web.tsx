@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadToastCorner } from "../../lib/presence-prefs";
+import { showDesktopNotice } from "../../lib/desktop-notice";
 import { useBroadcast } from "../session/BroadcastProvider";
 import { UpdatePrompt } from "./UpdatePrompt";
 
@@ -22,17 +22,7 @@ export function UpdateBanner() {
         // The update may have been downloaded before this page started listening.
         void desktop.getReadyUpdate().then(ready => ready && setUpdate(ready)).catch(() => undefined);
         const stopReady = desktop.onUpdateReady?.(setUpdate);
-        const stopNotice = desktop.onUpdateNotice?.(notice => {
-            void desktop.showLiveToast?.({
-                id: Date.now(),
-                userId: "p2p-cast",
-                username: notice.title,
-                avatar: null,
-                peerId: "update",
-                corner: loadToastCorner(),
-                message: notice.message,
-            }).catch(error => console.error("Could not show the update notice:", error));
-        });
+        const stopNotice = desktop.onUpdateNotice?.(notice => showDesktopNotice(notice.title, notice.message));
         return () => {
             stopReady?.();
             stopNotice?.();

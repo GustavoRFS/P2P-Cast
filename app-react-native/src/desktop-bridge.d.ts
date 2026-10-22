@@ -90,6 +90,17 @@ declare global {
         softwareEncoder?: boolean;
     }
 
+    /** A running native live moved to another capture and settings; viewers stay connected. */
+    interface DesktopNativeCaptureSwitch {
+        videoSourceId: string;
+        audioSourceId: string | null;
+        fps: number;
+        cursor: "always" | "motion" | "never";
+        maxWidth: number;
+        maxHeight: number;
+        bitrate: number | null;
+    }
+
     interface DesktopChatMessage {
         id: string;
         authorName: string;
@@ -161,6 +172,8 @@ declare global {
             /** Resolves once viewers can join, with the broadcast id the signaling server accepted. */
             startNativeBroadcast?(request: DesktopNativeBroadcastRequest): Promise<{ peerId: string }>;
             stopNativeBroadcast?(): Promise<void>;
+            /** Resolves with a warning when the switch happened without the new audio. */
+            switchNativeCapture?(request: DesktopNativeCaptureSwitch): Promise<string | null>;
             sendNativeChat?(message: DesktopChatMessage): Promise<void>;
             setNativeAudioMuted?(muted: boolean): Promise<void>;
             onNativeBroadcastEvent?(listener: (event: DesktopNativeBroadcastEvent) => void): () => void;

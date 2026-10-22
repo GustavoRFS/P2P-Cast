@@ -84,6 +84,8 @@ struct State {
     frame: Option<RawFrame>,
     spare: Vec<Vec<u8>>,
     keyframe: bool,
+    /// Settings for the frames from now on (the live switched to another profile).
+    new_settings: Option<VideoSettings>,
     stopped: bool,
 }
 
@@ -113,6 +115,15 @@ impl VideoInput {
             recycle(&mut state, replaced.rgba);
         }
         self.0.wake.notify_one();
+    }
+
+    /// New resolution bound, frame rate or bitrate from the next frame on. The encoder is rebuilt,
+    /// so every viewer gets a keyframe at the new size; nobody reconnects.
+    pub(crate) fn update_settings(&self, settings: VideoSettings) {
+        if let Ok(mut state) = self.0.state.lock() {
+            state.new_settings = Some(settings);
+            self.0.wake.notify_one();
+        }
     }
 
     /// Asks for a keyframe: a viewer joined or lost the picture.
@@ -194,7 +205,7 @@ fn create_encoder(
 
 fn run(
     shared: Arc<Shared>,
-    settings: VideoSettings,
+    mut settings: VideoSettings,
     sink: FrameSink,
     on_encoder: Arc<dyn Fn(EncoderInfo) + Send + Sync>,
     on_fatal: Arc<dyn Fn(String) + Send + Sync>,
@@ -217,7 +228,7 @@ fn run(
                 if state.stopped {
                     return;
                 }
-                if state.frame.is_some() || state.keyframe {
+                if state.frame.is_some() || state.keyframe || state.new_settings.is_some() {
                     break;
                 }
                 if picture.is_none() {
@@ -241,6 +252,14 @@ fn run(
                     Ok((state, _)) => state,
                     Err(_) => return,
                 };
+            }
+            if let Some(next) = state.new_settings.take() {
+                log::info!("video settings changed: max {}x{}, {} fps, bitrate {:?}", next.max_width, next.max_height, next.fps, next.bitrate);
+                settings = next;
+                // Rebuilt from the next frame, which the new capture is about to send.
+                encoder = None;
+                picture = None;
+                keyframe_pending = true;
             }
             let frame = state.frame.take();
             let requested = std::mem::take(&mut state.keyframe);
@@ -337,5 +356,52 @@ fn run(
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn a_settings_update_rebuilds_the_encoder_at_the_new_size() {
+        let (info_tx, info_rx) = mpsc::channel::<EncoderInfo>();
+        let (frame_tx, frame_rx) = mpsc::channel::<bool>();
+        let frame_tx = Mutex::new(frame_tx);
+        let info_tx = Mutex::new(info_tx);
+        let settings = VideoSettings {
+            max_width: 0,
+            max_height: 0,
+            fps: 30,
+            bitrate: Some(1_000_000),
+            encoder: EncoderPreference::Software,
+        };
+        let sink: FrameSink = Arc::new(move |frame: EncodedFrame| {
+            let _ = frame_tx.lock().unwrap().send(frame.keyframe);
+        });
+        let mut pipeline = VideoPipeline::start(
+            settings.clone(),
+            sink,
+            Arc::new(move |info| {
+                let _ = info_tx.lock().unwrap().send(info);
+            }),
+            Arc::new(|message| eprintln!("fatal: {message}")),
+        );
+        let input = pipeline.input();
+        let gray = |width: u32, height: u32| vec![128u8; (width * height * 4) as usize];
+
+        input.push_rgba(320, 240, gray(320, 240));
+        let first = info_rx.recv_timeout(Duration::from_secs(5)).expect("an encoder");
+        assert_eq!((first.width, first.height), (320, 240));
+        assert!(frame_rx.recv_timeout(Duration::from_secs(5)).expect("a frame"), "a new encoder starts with a keyframe");
+
+        input.update_settings(VideoSettings { max_width: 160, max_height: 120, ..settings });
+        input.push_rgba(320, 240, gray(320, 240));
+        let second = info_rx.recv_timeout(Duration::from_secs(5)).expect("a rebuilt encoder");
+        assert_eq!((second.width, second.height), (160, 120));
+        let keyframe = frame_rx.iter().take(5).any(|keyframe| keyframe);
+        assert!(keyframe, "the switch sends a keyframe at the new size");
+        pipeline.stop();
     }
 }
