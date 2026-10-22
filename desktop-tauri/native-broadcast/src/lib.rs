@@ -228,6 +228,7 @@ async fn run_signaling(
             host.handle(message);
         }
         host.set_outbound(None);
+        log::warn!("signaling connection lost; reconnecting as {peer_id}");
         events(BroadcastEvent::SignalingLost);
         // The server keeps a dead socket's id for a while, so ID-TAKEN here just means "not yet".
         let mut delay = Duration::from_secs(1);
@@ -236,6 +237,7 @@ async fn run_signaling(
             if let Ok((outbound, next)) = open_signaling(&server, &peer_id).await {
                 host.set_outbound(Some(outbound));
                 inbound = next;
+                log::info!("signaling connection restored");
                 events(BroadcastEvent::SignalingRestored);
                 break;
             }

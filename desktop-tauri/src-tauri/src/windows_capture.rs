@@ -10,7 +10,7 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter, Manager};
@@ -425,12 +425,27 @@ fn post_shared_frame(
         .map_err(|_| "Timed out posting a shared frame to WebView2.".to_string())?
 }
 
+// The helper marks a frame as waiting for its acknowledgement only after writing it, so an
+// acknowledgement sent the instant the frame is read can get there first and be lost: the helper
+// then waits forever and the picture freezes. While no frame comes, the acknowledgement is repeated
+// this often, so a lost one costs a frame at most; an extra one is harmless.
+const ACK_RETRY: Duration = Duration::from_millis(20);
+
 /// The WGC helper feeding the native sender: frames go straight to its encoder and never reach the
 /// webview.
 pub struct NativeVideoCapture {
     child: Child,
     stopped: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
+    acknowledger: Option<JoinHandle<()>>,
+}
+
+fn acknowledge_frame(stdin: &Mutex<ChildStdin>) -> std::io::Result<()> {
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_| std::io::Error::other("acknowledgement pipe is unavailable"))?;
+    stdin.write_all(&[1])?;
+    stdin.flush()
 }
 
 pub fn start_native(
@@ -442,14 +457,46 @@ pub fn start_native(
 ) -> Result<NativeVideoCapture, String> {
     let Helper {
         child,
-        mut stdin,
+        stdin,
         mut stdout,
-        ..
+        width,
+        height,
     } = spawn_helper(app, source_id, settings)?;
+    log::info!("native capture started for {source_id}: {width}x{height} at up to {} fps", settings.fps);
+    let stdin = Arc::new(Mutex::new(stdin));
     let stopped = Arc::new(AtomicBool::new(false));
+    let started = Instant::now();
+    // Milliseconds since `started` when the last frame was read.
+    let last_frame = Arc::new(AtomicU64::new(0));
+
+    let acknowledger_stdin = stdin.clone();
+    let acknowledger_stopped = stopped.clone();
+    let acknowledger_last_frame = last_frame.clone();
+    let acknowledger = thread::spawn(move || {
+        let mut retries = 0u64;
+        let mut last_report = Instant::now();
+        while !acknowledger_stopped.load(Ordering::Acquire) {
+            thread::sleep(ACK_RETRY);
+            let idle = (started.elapsed().as_millis() as u64).saturating_sub(acknowledger_last_frame.load(Ordering::Acquire));
+            if idle >= ACK_RETRY.as_millis() as u64 {
+                if acknowledge_frame(&acknowledger_stdin).is_err() {
+                    break;
+                }
+                retries += 1;
+            }
+            if last_report.elapsed() >= Duration::from_secs(60) {
+                log::info!("capture: acknowledgement repeated {retries} times in the last minute (idle {idle} ms)");
+                retries = 0;
+                last_report = Instant::now();
+            }
+        }
+    });
+
     let worker_stopped = stopped.clone();
     let worker = thread::spawn(move || {
         let mut header = [0u8; 16];
+        let mut frames = 0u64;
+        let mut window_start = Instant::now();
         let failure = loop {
             if let Err(error) = stdout.read_exact(&mut header) {
                 break format!("A captura de vídeo parou: {error}");
@@ -461,13 +508,24 @@ pub fn start_native(
             if let Err(error) = stdout.read_exact(&mut frame) {
                 break format!("A captura de vídeo parou: {error}");
             }
+            last_frame.store(started.elapsed().as_millis() as u64, Ordering::Release);
             // Released right away: the helper grabs the next frame while this one is encoded.
-            if let Err(error) = stdin.write_all(&[1]).and_then(|()| stdin.flush()) {
+            if let Err(error) = acknowledge_frame(&stdin) {
                 break format!("A captura de vídeo parou: {error}");
             }
             input.push_rgba(width, height, frame);
+            frames += 1;
+            if window_start.elapsed() >= Duration::from_secs(30) {
+                log::info!(
+                    "capture: {frames} frames in the last {:.0} s ({width}x{height})",
+                    window_start.elapsed().as_secs_f64()
+                );
+                frames = 0;
+                window_start = Instant::now();
+            }
         };
         if !worker_stopped.load(Ordering::Acquire) {
+            log::error!("native capture ended: {failure}");
             on_error(failure);
         }
     });
@@ -475,6 +533,7 @@ pub fn start_native(
         child,
         stopped,
         worker: Some(worker),
+        acknowledger: Some(acknowledger),
     })
 }
 
@@ -485,6 +544,9 @@ impl NativeVideoCapture {
         let _ = self.child.wait();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
+        }
+        if let Some(acknowledger) = self.acknowledger.take() {
+            let _ = acknowledger.join();
         }
     }
 }

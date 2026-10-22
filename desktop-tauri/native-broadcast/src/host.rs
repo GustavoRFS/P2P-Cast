@@ -267,11 +267,13 @@ impl Host {
                         }
                         None => {
                             drop(state);
+                            log::info!("refused a repeated call from {src}");
                             self.send_leave(&src);
                             return;
                         }
                     }
                 };
+                log::info!("viewer {src} calling ({connection_id}), replacing {} old connection(s)", evicted.len());
                 evicted.iter().for_each(|stale| self.close_link(stale));
                 self.update_viewer_count();
                 let host = self.clone();
@@ -544,6 +546,7 @@ impl Host {
     }
 
     fn on_connection_state(self: &Arc<Self>, connection_id: &str, state: RTCPeerConnectionState) {
+        log::info!("{connection_id}: {state}");
         match state {
             RTCPeerConnectionState::Connected => {
                 if let Ok(state) = self.state.lock() {
@@ -634,6 +637,9 @@ impl Host {
             Err(_) => None,
         };
         let Some(link) = link else { return };
+        if link.kind == LinkKind::Media {
+            log::info!("viewer {} gone ({connection_id})", link.remote);
+        }
         link.tasks.iter().for_each(JoinHandle::abort);
         let (pc, channel) = (link.pc, link.channel);
         self.runtime.spawn(async move {

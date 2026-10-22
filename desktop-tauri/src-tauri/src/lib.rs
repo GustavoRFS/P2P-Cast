@@ -21,6 +21,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+mod app_log;
 mod native_broadcast;
 mod updates;
 mod windows_audio;
@@ -868,6 +869,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            app_log::init(app.handle());
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;
             build_tray(app.handle())?;

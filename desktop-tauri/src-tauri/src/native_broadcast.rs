@@ -101,7 +101,21 @@ pub async fn start_native_broadcast(
             encoder: if request.software_encoder { EncoderPreference::Software } else { EncoderPreference::Auto },
         },
     );
-    let broadcast = Arc::new(NativeBroadcast::start(config, events.clone()).await?);
+    log::info!(
+        "starting native broadcast: video {}, audio {:?}, {fps} fps, max {}x{}, bitrate {:?}",
+        request.video_source_id,
+        request.audio_source_id,
+        request.max_width,
+        request.max_height,
+        request.bitrate
+    );
+    let broadcast = match NativeBroadcast::start(config, events.clone()).await {
+        Ok(broadcast) => Arc::new(broadcast),
+        Err(error) => {
+            log::error!("native broadcast did not start: {error}");
+            return Err(error);
+        }
+    };
     let on_error = |events: &EventSink| -> Box<dyn Fn(String) + Send> {
         let events = events.clone();
         Box::new(move |message| events(BroadcastEvent::Fatal { message }))
@@ -117,6 +131,7 @@ pub async fn start_native_broadcast(
     ) {
         Ok(video) => video,
         Err(error) => {
+            log::error!("native capture did not start: {error}");
             broadcast.stop();
             return Err(error);
         }
@@ -125,6 +140,7 @@ pub async fn start_native_broadcast(
         Some(source) => match windows_audio::start_native(&app, source, broadcast.audio_input(), on_error(&events)) {
             Ok(audio) => Some(audio),
             Err(error) => {
+                log::error!("native audio capture did not start: {error}");
                 let mut running = Running { broadcast, video, audio: None };
                 running.stop();
                 return Err(error);
@@ -134,6 +150,7 @@ pub async fn start_native_broadcast(
     };
 
     let peer_id = broadcast.peer_id().to_string();
+    log::info!("native broadcast live as {peer_id}");
     match state.0.lock() {
         Ok(mut current) => *current = Some(Running { broadcast, video, audio }),
         Err(_) => {
@@ -148,6 +165,7 @@ pub async fn start_native_broadcast(
 pub async fn stop_native_broadcast(state: State<'_, NativeBroadcasts>) -> Result<(), String> {
     let running = state.0.lock().ok().and_then(|mut current| current.take());
     if let Some(mut running) = running {
+        log::info!("stopping native broadcast");
         // Joins the helpers' readers and the encoder thread.
         tauri::async_runtime::spawn_blocking(move || running.stop())
             .await

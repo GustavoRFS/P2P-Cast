@@ -206,6 +206,9 @@ fn run(
     let mut last_encode = Instant::now();
     let mut last_keyframe: Option<Instant> = None;
     let mut keyframe_pending = true;
+    // For the periodic log line: what happened since the last one.
+    let mut stats_since = Instant::now();
+    let (mut new_frames, mut repeats, mut keyframes) = (0u32, 0u32, 0u32);
 
     loop {
         let (frame, keyframe_requested) = {
@@ -252,12 +255,18 @@ fn run(
                 if current.as_ref().map_or(true, |info| (info.width, info.height) != (width, height)) {
                     match create_encoder(software_only, width, height, &settings, &sink) {
                         Ok(created) => {
-                            on_encoder(created.info());
+                            let info = created.info();
+                            log::info!(
+                                "encoder {} for {}x{} from a {}x{} capture, {} fps, {} bps",
+                                info.name, info.width, info.height, frame.width, frame.height, info.fps, info.bitrate
+                            );
+                            on_encoder(info);
                             picture = Some(YuvFrame::new(width, height, created.layout()));
                             encoder = Some(created);
                             keyframe_pending = true;
                         }
                         Err(error) => {
+                            log::error!("no video encoder: {error}");
                             on_fatal(format!("Não foi possível iniciar o codificador de vídeo: {error}"));
                             return;
                         }
@@ -271,10 +280,14 @@ fn run(
                 if let Ok(mut state) = shared.state.lock() {
                     recycle(&mut state, frame.rgba);
                 }
+                new_frames += 1;
                 captured_at
             }
             // A repeat of the still picture, stamped now so viewers see time moving on.
-            None if picture.is_some() => Instant::now(),
+            None if picture.is_some() => {
+                repeats += 1;
+                Instant::now()
+            }
             None => continue,
         };
 
@@ -286,6 +299,15 @@ fn run(
                 if force {
                     keyframe_pending = false;
                     last_keyframe = Some(last_encode);
+                    keyframes += 1;
+                }
+                if stats_since.elapsed() >= Duration::from_secs(30) {
+                    log::info!(
+                        "video: {new_frames} new frames, {repeats} repeats of a still picture, {keyframes} forced keyframes in {:.0} s",
+                        stats_since.elapsed().as_secs_f64()
+                    );
+                    stats_since = Instant::now();
+                    (new_frames, repeats, keyframes) = (0, 0, 0);
                 }
             }
             Err(error) if active.info().hardware => {
@@ -310,6 +332,7 @@ fn run(
                 }
             }
             Err(error) => {
+                log::error!("video encoder failed: {error}");
                 on_fatal(format!("O codificador de vídeo parou: {error}"));
                 return;
             }
