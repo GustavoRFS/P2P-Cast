@@ -19,6 +19,12 @@ export type DesktopConfig = {
 };
 
 const desktopCaptureReleases = new WeakMap<MediaStream, () => void>();
+const desktopCaptureRefreshers = new WeakMap<MediaStream, () => void>();
+
+// WGC only reports a frame when the window changes, and the canvas track only carries the frames it
+// is given. A viewer that connects while the picture is still would get nothing, so the last frame
+// is drawn again when it has not changed for this long, and as soon as a viewer connects.
+const DIRECT_CAPTURE_REFRESH_MS = 1000;
 
 export function isDesktopApp(): boolean {
     return typeof window !== "undefined" && Boolean(window.p2pcastDesktop);
@@ -45,6 +51,12 @@ export function releaseDesktopCapture(stream: MediaStream | null): void {
     if (!stream) return;
     desktopCaptureReleases.get(stream)?.();
     desktopCaptureReleases.delete(stream);
+    desktopCaptureRefreshers.delete(stream);
+}
+
+/** Sends the current picture again, so a viewer that just connected does not wait for a change. */
+export function refreshDesktopCapture(stream: MediaStream | null): void {
+    if (stream) desktopCaptureRefreshers.get(stream)?.();
 }
 
 function resolvedCanvasSize(width: number, height: number, resolution: CaptureSettings["resolution"]): [number, number] {
@@ -69,7 +81,12 @@ export async function captureDesktopWindow(
     let directCaptureId: string | null = null;
     let removeDirectFrameListener = () => {};
     let removeDirectErrorListener = () => {};
+    let refreshDirectFrame: (() => void) | null = null;
+    let directRefreshTimer: ReturnType<typeof setInterval> | null = null;
     const disposeDirectCapture = () => {
+        if (directRefreshTimer) clearInterval(directRefreshTimer);
+        directRefreshTimer = null;
+        refreshDirectFrame = null;
         removeDirectFrameListener();
         removeDirectErrorListener();
         if (directCaptureId) void desktop.stopDirectVideoCapture?.(directCaptureId).catch(() => undefined);
@@ -102,6 +119,7 @@ export async function captureDesktopWindow(
         const outputTrack = outputStream.getVideoTracks()[0] as (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
         videoStream = outputStream;
         let frameImage: ImageData | null = null;
+        let lastFrameAt = 0;
         removeDirectFrameListener = desktop.onDirectVideoFrame(started.captureId, frame => {
             if (frame.buffer.byteLength !== frame.width * frame.height * 4) return;
             if (sourceCanvas.width !== frame.width || sourceCanvas.height !== frame.height) {
@@ -121,7 +139,14 @@ export async function captureDesktopWindow(
             sourceContext.putImageData(frameImage, 0, 0);
             outputContext.drawImage(sourceCanvas, 0, 0, width, height);
             outputTrack?.requestFrame?.();
+            lastFrameAt = performance.now();
         });
+        // requestFrame() alone does not resend an unchanged canvas; drawing it again does.
+        refreshDirectFrame = () => {
+            if (!frameImage) return;
+            outputContext.drawImage(sourceCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
+            outputTrack?.requestFrame?.();
+        };
         removeDirectErrorListener = desktop.onDirectVideoError(started.captureId, message => {
             window.dispatchEvent(new CustomEvent("p2pcast:direct-video-error", { detail: message }));
         });
@@ -135,6 +160,9 @@ export async function captureDesktopWindow(
             removeDirectErrorListener();
             throw error;
         }
+        directRefreshTimer = setInterval(() => {
+            if (performance.now() - lastFrameAt >= DIRECT_CAPTURE_REFRESH_MS) refreshDirectFrame?.();
+        }, DIRECT_CAPTURE_REFRESH_MS);
     } else {
         if (desktopConfig.capturePicker === "window-list") await desktop.selectWindow(sourceId);
         const pickerOptions = desktopConfig.capturePicker === "system-window"
@@ -228,6 +256,7 @@ export async function captureDesktopWindow(
         stream.getVideoTracks().forEach(track => track.addEventListener("ended", release, { once: true }));
         stream.getAudioTracks().forEach(track => track.addEventListener("ended", release, { once: true }));
         desktopCaptureReleases.set(stream, release);
+        desktopCaptureRefreshers.set(stream, () => refreshDirectFrame?.());
         return stream;
     } catch (error) {
         release();

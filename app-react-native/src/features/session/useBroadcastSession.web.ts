@@ -24,6 +24,7 @@ import {
     getDesktopConfig,
     isDesktopApp,
     listDesktopCaptureTargets,
+    refreshDesktopCapture,
     releaseDesktopCapture,
     resolveDesktopCaptureTarget,
     type DesktopConfig,
@@ -279,6 +280,15 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
 
                 call.answer(stream);
                 void applyVideoBitrate(call, nextSettings.bitrate).catch(() => undefined);
+                // The desktop capture only sends frames when the window changes; without this a
+                // viewer that joins during a still picture sees nothing until something moves.
+                const connection = call.peerConnection;
+                const refreshWhenConnected = () => {
+                    if (connection.connectionState !== "connected") return;
+                    connection.removeEventListener("connectionstatechange", refreshWhenConnected);
+                    refreshDesktopCapture(stream);
+                };
+                connection?.addEventListener("connectionstatechange", refreshWhenConnected);
             });
 
             peer.on("connection", conn => {
