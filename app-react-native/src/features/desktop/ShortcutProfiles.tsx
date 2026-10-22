@@ -32,11 +32,13 @@ export function ShortcutProfiles({
     desktop,
     defaults,
     live,
+    onStopLive,
 }: {
     desktop: DesktopState;
     defaults: CaptureSettings;
     /** A live is on: the cards lead back to it, or switch it to their profile. */
     live: boolean;
+    onStopLive(): void;
 }) {
     const { captureTargets: targets, shortcutProfiles: profiles } = desktop;
     const directCaptureAvailable = desktop.config?.directVideoCaptureAvailable ?? false;
@@ -169,7 +171,17 @@ export function ShortcutProfiles({
                                         onPress={() => desktop.startProfile(profile.id)}
                                     />
                                 ) : desktop.activeProfile?.id === profile.id ? (
-                                    <Button size="sm" label="Ver transmissão" onPress={goToBroadcast} />
+                                    <>
+                                        <Button size="sm" label="Ver transmissão" onPress={goToBroadcast} />
+                                        <Button
+                                            size="sm"
+                                            variant="danger"
+                                            label="Encerrar transmissão"
+                                            icon={<Text className="text-[10px] font-extrabold text-danger">■</Text>}
+                                            iconPosition="start"
+                                            onPress={onStopLive}
+                                        />
+                                    </>
                                 ) : (
                                     <Button size="sm" variant="secondary" label="Trocar para este" onPress={() => desktop.switchProfile(profile.id)} />
                                 )}

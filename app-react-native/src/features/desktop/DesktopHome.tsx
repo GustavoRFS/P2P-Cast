@@ -15,7 +15,7 @@ export function DesktopHome() {
         <Screen>
             {broadcast.error && <ErrorCard error={broadcast.error} onDismiss={broadcast.clearError} />}
             <View className="w-full max-w-2xl gap-5 self-center">
-                {desktop && <ShortcutProfiles desktop={desktop} defaults={broadcast.settings} live={live} />}
+                {desktop && <ShortcutProfiles desktop={desktop} defaults={broadcast.settings} live={live} onStopLive={broadcast.stop} />}
                 <WatchLinkPanel />
             </View>
         </Screen>

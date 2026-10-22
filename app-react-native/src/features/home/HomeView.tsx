@@ -1,4 +1,4 @@
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { Button } from "../../components/Button";
 import { CaptureSettingsFields } from "../../components/CaptureSettingsFields";
 import { Panel, PanelHeading } from "../../components/Panel";
@@ -33,7 +33,18 @@ export function HomeView() {
                                 title="Você está transmitindo"
                                 subtitle={`${broadcast.viewerCount} ${broadcast.viewerCount === 1 ? "pessoa assistindo" : "pessoas assistindo"}. A live continua enquanto você navega.`}
                             />
-                            <Button size="lg" label="Ver transmissão" onPress={goToBroadcast} className="self-stretch sm:self-start" />
+                            <View className="flex-row flex-wrap gap-3">
+                                <Button size="lg" label="Ver transmissão" onPress={goToBroadcast} className="flex-grow sm:flex-grow-0" />
+                                <Button
+                                    size="lg"
+                                    variant="danger"
+                                    label="Encerrar transmissão"
+                                    icon={<Text className="text-sm font-extrabold text-danger">■</Text>}
+                                    iconPosition="start"
+                                    onPress={broadcast.stop}
+                                    className="flex-grow sm:flex-grow-0"
+                                />
+                            </View>
                         </Panel>
                     ) : (
                         <Panel className="md:flex-[3]">
