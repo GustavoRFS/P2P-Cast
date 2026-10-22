@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { Button, IconButton } from "../../components/Button";
 import { Note, Panel, PanelHeading } from "../../components/Panel";
@@ -11,6 +12,12 @@ import type { NativeSenderInfo } from "./types";
 
 function formatBitrate(bitrate: number): string {
     return `${(bitrate / 1_000_000).toFixed(bitrate % 1_000_000 === 0 ? 0 : 1)} Mbps`;
+}
+
+/** The live keeps going: home (or wherever the user came from), back here through the drawer. */
+function goHome() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
 }
 
 /** In place of the local preview: the app is encoding and sending the live itself. */
@@ -42,6 +49,14 @@ export function BroadcastRoom() {
 
     return (
         <Screen headerRight={<StatusPill mode={broadcast.mode} />}>
+            <Button
+                size="sm"
+                variant="ghost"
+                label="← Início"
+                accessibilityLabel="Voltar ao início sem encerrar a live"
+                onPress={goHome}
+                className="self-start"
+            />
             <View className="gap-5 lg:flex-row lg:items-start">
                 <Panel className="lg:flex-[3]">
                     <View className="flex-row flex-wrap items-center justify-between gap-2">

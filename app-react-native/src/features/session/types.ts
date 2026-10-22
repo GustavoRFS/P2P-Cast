@@ -47,6 +47,8 @@ export type DesktopState = {
     activeProfile: ShortcutProfile | null;
     /** Starts a live with a profile, as its shortcut would (the button on its card). */
     startProfile(profileId: string): void;
+    /** Moves the running live to another profile, as a second press of its shortcut would. */
+    switchProfile(profileId: string): void;
 };
 
 export type BroadcastSession = {

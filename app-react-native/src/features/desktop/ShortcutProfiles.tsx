@@ -17,6 +17,7 @@ import {
     type ShortcutProfile,
 } from "../../lib/shortcut-profiles";
 import type { DesktopState } from "../session/types";
+import { goToBroadcast } from "../shell/AppShell";
 import { ShortcutInput } from "./ShortcutInput";
 
 // The target a profile already has, kept when its program is not running while editing.
@@ -30,9 +31,12 @@ const SAVED_TARGET = "saved";
 export function ShortcutProfiles({
     desktop,
     defaults,
+    live,
 }: {
     desktop: DesktopState;
     defaults: CaptureSettings;
+    /** A live is on: the cards lead back to it, or switch it to their profile. */
+    live: boolean;
 }) {
     const { captureTargets: targets, shortcutProfiles: profiles } = desktop;
     const directCaptureAvailable = desktop.config?.directVideoCaptureAvailable ?? false;
@@ -140,21 +144,35 @@ export function ShortcutProfiles({
                                 <Text className="font-mono text-[10px] font-bold text-accent">{profile.shortcut}</Text>
                             </View>
                             <View className="min-w-[140px] flex-1 gap-0.5">
-                                <Text className="text-[12px] font-extrabold text-ink" numberOfLines={1}>{profile.name}</Text>
+                                <View className="flex-row items-center gap-2">
+                                    <Text className="shrink text-[12px] font-extrabold text-ink" numberOfLines={1}>{profile.name}</Text>
+                                    {live && desktop.activeProfile?.id === profile.id && (
+                                        <View className="flex-row items-center gap-1 rounded-full bg-danger/15 px-1.5 py-0.5">
+                                            <View className="h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />
+                                            <Text className="text-[8px] font-extrabold uppercase tracking-widest text-danger">ao vivo</Text>
+                                        </View>
+                                    )}
+                                </View>
                                 <Text className="text-[10px] text-muted" numberOfLines={1}>
                                     {profile.videoTarget.kind === "monitor" ? "tela inteira · áudio do sistema sem Discord · " : ""}
                                     {formatCaptureSettings(profile.settings)}
                                 </Text>
                             </View>
                             <View className="flex-row items-center gap-1">
-                                <Button
-                                    size="sm"
-                                    label="Iniciar live"
-                                    icon={<Text className="text-[10px] font-extrabold text-ink-dark">▶</Text>}
-                                    iconPosition="start"
-                                    disabled={!directCaptureAvailable}
-                                    onPress={() => desktop.startProfile(profile.id)}
-                                />
+                                {!live ? (
+                                    <Button
+                                        size="sm"
+                                        label="Iniciar live"
+                                        icon={<Text className="text-[10px] font-extrabold text-ink-dark">▶</Text>}
+                                        iconPosition="start"
+                                        disabled={!directCaptureAvailable}
+                                        onPress={() => desktop.startProfile(profile.id)}
+                                    />
+                                ) : desktop.activeProfile?.id === profile.id ? (
+                                    <Button size="sm" label="Ver transmissão" onPress={goToBroadcast} />
+                                ) : (
+                                    <Button size="sm" variant="secondary" label="Trocar para este" onPress={() => desktop.switchProfile(profile.id)} />
+                                )}
                                 <Button size="sm" variant="ghost" label="Editar" onPress={() => openForm(profile)} />
                                 <Button
                                     size="sm"

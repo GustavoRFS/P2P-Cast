@@ -10,6 +10,7 @@ import { AccountProvider } from "../features/account/AccountProvider";
 import { InstallAppModal } from "../features/install/InstallAppModal";
 import { LiveToasts } from "../features/account/LiveToasts";
 import { BroadcastProvider } from "../features/session/BroadcastProvider";
+import { AppShell } from "../features/shell/AppShell";
 import { LiveToastWindow } from "../features/toast/LiveToastWindow";
 import { UpdateBanner } from "../features/updates/UpdateBanner";
 import { initializeDesktopBridge } from "../platform/desktop-bridge";
@@ -57,7 +58,9 @@ function AppLayout() {
             <AccountProvider>
                 <BroadcastProvider>
                     <StatusBar style="light" />
-                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#07111f" } }} />
+                    <AppShell>
+                        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#07111f" } }} />
+                    </AppShell>
                     <LiveToasts />
                     <UpdateBanner />
                     <InstallAppModal />

@@ -529,8 +529,16 @@ fn show_main_window(app: &AppHandle) {
 
 const TOAST_WINDOW: &str = "toast";
 const TOAST_WIDTH: f64 = 380.0;
-const TOAST_HEIGHT: f64 = 100.0;
+// One card of the stack and the space around it, as the toast page lays them out (h-[84px],
+// gap-2, p-2): the window is exactly as tall as the cards it shows, so it never covers more of the
+// screen (or a game) than they do.
+const TOAST_CARD_HEIGHT: f64 = 84.0;
+const TOAST_GAP: f64 = 8.0;
+const TOAST_PADDING: f64 = 8.0;
+const MAX_TOASTS: u32 = 4;
 const TOAST_MARGIN: f64 = 16.0;
+// How many cards the toast page shows; 0 while the window is hidden.
+static TOAST_STACK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 const TOAST_CORNERS: [&str; 4] = ["top-right", "bottom-right", "top-left", "bottom-left"];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -588,7 +596,7 @@ fn ensure_toast_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     }
     let window = builder
         .title("P2P-Cast")
-        .inner_size(TOAST_WIDTH, TOAST_HEIGHT)
+        .inner_size(TOAST_WIDTH, TOAST_PADDING * 2.0 + TOAST_CARD_HEIGHT)
         .resizable(false)
         .decorations(false)
         .transparent(true)
@@ -639,7 +647,8 @@ fn set_toast_styles(window: &WebviewWindow) -> Result<(), String> {
 
 /// The toast's physical rect (x, y, width, height) in a corner of the primary monitor's work area,
 /// clear of the taskbar.
-fn toast_rect(window: &WebviewWindow, corner: &str) -> Result<(i32, i32, i32, i32), String> {
+/// Where a stack of `count` cards goes: against the corner, growing away from it.
+fn toast_rect(window: &WebviewWindow, corner: &str, count: u32) -> Result<(i32, i32, i32, i32), String> {
     let monitor = match window.primary_monitor().map_err(|error| error.to_string())? {
         Some(monitor) => monitor,
         None => window
@@ -650,7 +659,9 @@ fn toast_rect(window: &WebviewWindow, corner: &str) -> Result<(i32, i32, i32, i3
     let area = monitor.work_area();
     let scale = monitor.scale_factor();
     let width = (TOAST_WIDTH * scale).round() as i32;
-    let height = (TOAST_HEIGHT * scale).round() as i32;
+    let cards = count.clamp(1, MAX_TOASTS) as f64;
+    let logical_height = TOAST_PADDING * 2.0 + cards * TOAST_CARD_HEIGHT + (cards - 1.0) * TOAST_GAP;
+    let height = (logical_height * scale).round() as i32;
     let margin = (TOAST_MARGIN * scale).round() as i32;
     let x = if corner.ends_with("left") {
         area.position.x + margin
@@ -732,14 +743,42 @@ fn show_live_toast(
         return Err("Invalid live notification".to_string());
     }
     let window = ensure_toast_window(&app)?;
-    let rect = toast_rect(&window, &toast.corner)?;
     *pending
         .0
         .lock()
         .map_err(|_| "Notification state is unavailable".to_string())? = Some(toast.clone());
     app.emit_to(TOAST_WINDOW, "live-toast", &toast)
         .map_err(|error| format!("Could not send the notification: {error}"))?;
+    // The page sizes the window for its stack (layout_live_toasts); the first card shows it now.
     // Shown without activation, so the game keeps the keyboard and mouse.
+    if TOAST_STACK.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        show_toast_window(&window, toast_rect(&window, &toast.corner, 1)?)?;
+    }
+    Ok(())
+}
+
+/// The toast page's stack changed: fit the window to its cards, or hide it when there are none.
+#[tauri::command]
+fn layout_live_toasts(
+    app: AppHandle,
+    pending: State<'_, PendingLiveToast>,
+    count: u32,
+    corner: String,
+) -> Result<(), String> {
+    if count == 0 {
+        if let Ok(mut slot) = pending.0.lock() {
+            *slot = None;
+        }
+        TOAST_STACK.store(0, std::sync::atomic::Ordering::Release);
+        hide_toast_window(&app);
+        return Ok(());
+    }
+    if count > MAX_TOASTS || !TOAST_CORNERS.contains(&corner.as_str()) {
+        return Err("Invalid notification layout".to_string());
+    }
+    let window = ensure_toast_window(&app)?;
+    let rect = toast_rect(&window, &corner, count)?;
+    TOAST_STACK.store(count, std::sync::atomic::Ordering::Release);
     show_toast_window(&window, rect)
 }
 
@@ -753,6 +792,7 @@ fn hide_live_toast(app: AppHandle, pending: State<'_, PendingLiveToast>) {
     if let Ok(mut slot) = pending.0.lock() {
         *slot = None;
     }
+    TOAST_STACK.store(0, std::sync::atomic::Ordering::Release);
     hide_toast_window(&app);
 }
 
@@ -762,6 +802,7 @@ fn open_live_from_toast(app: AppHandle, peer_id: String) -> Result<(), String> {
     if !valid_peer_id(&peer_id) {
         return Err("Invalid live".to_string());
     }
+    TOAST_STACK.store(0, std::sync::atomic::Ordering::Release);
     hide_toast_window(&app);
     show_main_window(&app);
     app.emit_to("main", "open-live", peer_id)
@@ -857,6 +898,7 @@ pub fn run() {
             show_live_toast,
             take_pending_live_toast,
             hide_live_toast,
+            layout_live_toasts,
             open_live_from_toast,
             updates::get_ready_update,
             updates::install_ready_update,

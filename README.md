@@ -110,7 +110,9 @@ Os perfis de atalho podem ser editados, e cada card tem um botão "Iniciar live"
 - **Atalho do perfil atual:** encerra a live.
 - **Atalho de outro perfil:** troca a captura e as configurações sem encerrar. No envio nativo, o capturador novo começa antes de o antigo parar, e quem assiste recebe um quadro-chave no tamanho novo, sem reconectar. No caminho pelo WebView, as faixas de cada conexão são substituídas.
 
-Iniciar pelo atalho, encerrar, trocar e uma parada inesperada geram avisos só para quem transmite, na janela de notificação e no canto escolhido no app. Os outros usuários continuam recebendo aviso só quando uma live começa.
+Iniciar pelo atalho, encerrar, trocar e uma parada inesperada geram avisos só para quem transmite, na janela de notificação e no canto escolhido no app. Os outros usuários continuam recebendo aviso só quando uma live começa. Os avisos se empilham (até 4, o mais novo junto da borda do canto; um quinto tira o mais antigo), cada um com o próprio tempo, e a janela tem a altura exata dos cards.
+
+Quando uma live começa, o app abre a tela dela uma vez; dali dá para voltar ao início ("← Início") ou assistir outras lives sem encerrar a transmissão. O drawer do Discord fica em todas as telas, e o card "Como os outros te veem" mostra "Ver transmissão" enquanto você transmite. Na home do desktop, o card do perfil no ar leva de volta à live, e os outros trocam a live para eles.
 
 ### Envio nativo
 

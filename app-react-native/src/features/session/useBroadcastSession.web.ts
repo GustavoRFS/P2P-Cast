@@ -763,6 +763,14 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                     const profile = shortcutProfiles.find(item => item.id === profileId);
                     if (profile) void startProfile(profile, false);
                 },
+                switchProfile: (profileId: string) => {
+                    const profile = shortcutProfiles.find(item => item.id === profileId);
+                    if (!profile || modeRef.current !== "broadcasting" || switchingRef.current) return;
+                    switchingRef.current = true;
+                    void switchProfile(profile).finally(() => {
+                        switchingRef.current = false;
+                    });
+                },
             }
             : null,
         nativeSender,

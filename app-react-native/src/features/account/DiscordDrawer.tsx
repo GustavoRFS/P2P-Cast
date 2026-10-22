@@ -48,7 +48,18 @@ function Avatar({ user }: { user: PresenceUser }) {
     );
 }
 
-function PresenceRow({ user, onWatch, preview = false }: { user: PresenceUser; onWatch?: (peerId: string) => void; preview?: boolean }) {
+function PresenceRow({
+    user,
+    onWatch,
+    preview = false,
+    onViewLive,
+}: {
+    user: PresenceUser;
+    onWatch?: (peerId: string) => void;
+    preview?: boolean;
+    /** Your own card while you broadcast: back to the live room. */
+    onViewLive?: () => void;
+}) {
     const live = user.peerId !== null;
     const watchable = live && !preview && onWatch;
     const dimmed = user.status === "invisible" || (!live && user.status === "busy");
@@ -71,6 +82,16 @@ function PresenceRow({ user, onWatch, preview = false }: { user: PresenceUser; o
             <View className="flex-1 gap-0.5">
                 <Text className="text-[12px] font-extrabold text-ink" numberOfLines={1}>{user.username}</Text>
                 <Text className="text-[10px] text-muted" numberOfLines={1}>{describe(user)}</Text>
+                {onViewLive ? (
+                    <Pressable
+                        accessibilityRole="link"
+                        accessibilityLabel="Ver transmissão"
+                        onPress={onViewLive}
+                        className="self-start rounded active:opacity-70"
+                    >
+                        <Text className="text-[10px] font-extrabold text-accent underline-offset-2 hover:underline">Ver transmissão</Text>
+                    </Pressable>
+                ) : null}
             </View>
             {live && user.status !== "invisible" && <View className="h-2 w-2 animate-pulse rounded-full bg-danger" accessibilityLabel="Ao vivo" />}
         </Pressable>
@@ -117,10 +138,13 @@ export function DiscordDrawer({
     account,
     open,
     onToggle,
+    onViewLive,
 }: {
     account: DiscordAccount;
     open: boolean;
     onToggle: () => void;
+    /** Set while this device broadcasts and its live room is not on screen. */
+    onViewLive?: () => void;
 }) {
     const [corner, setCorner] = useState<ToastCorner>(loadToastCorner);
     const liveCount = account.onlineUsers.filter(user => user.peerId !== null).length;
@@ -180,7 +204,7 @@ export function DiscordDrawer({
                             <StatusPicker value={account.status} onChange={account.setStatus} />
 
                             <SectionLabel>Como os outros te veem</SectionLabel>
-                            <PresenceRow user={account.self} preview />
+                            <PresenceRow user={account.self} preview onViewLive={onViewLive} />
 
                             <SectionLabel>{`No app agora · ${account.onlineUsers.length}`}</SectionLabel>
                             {account.onlineUsers.length === 0 ? (
