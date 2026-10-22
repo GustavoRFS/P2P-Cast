@@ -11,6 +11,7 @@ import {
     saveViewerVolume,
     type ChatMessage,
 } from "../../lib/chat";
+import { startWatching } from "../../lib/desktop-activity";
 import { createPeer, sendPeerLeave } from "../../lib/peer";
 import { createNegotiationStream, type NegotiationStream } from "../../lib/receiver";
 import { getPeerError } from "../../lib/status";
@@ -188,6 +189,9 @@ export function useViewerSession(broadcastId: string): ViewerSession {
         connect();
         return cleanup;
     }, [connect, cleanup]);
+
+    // The desktop app does not update itself while a live is on screen.
+    useEffect(() => startWatching(), []);
 
     const toggleAudio = useCallback(() => setAudioOn(current => !current), []);
 

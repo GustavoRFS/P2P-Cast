@@ -140,6 +140,8 @@ declare global {
             getReadyUpdate?(): Promise<DesktopUpdate | null>;
             /** Closes the app; the installer reopens it on the new version. */
             installUpdate?(): Promise<void>;
+            /** A live is on screen here: a silent update waits until there is none. */
+            setWatching?(watching: boolean): Promise<void>;
             onUpdateReady?(listener: (update: DesktopUpdate) => void): () => void;
             onUpdateNotice?(listener: (notice: DesktopUpdateNotice) => void): () => void;
             loginWithDiscord(codeChallenge: string): Promise<void>;

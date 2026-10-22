@@ -7,6 +7,7 @@ use p2pcast_native_broadcast::{
     BroadcastConfig, BroadcastEvent, ChatMessage, EncoderPreference, EventSink, NativeBroadcast, VideoSettings,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
@@ -31,12 +32,13 @@ impl Running {
     }
 }
 
+/// The running native live, and whether a profile switch has it out of the slot right now.
 #[derive(Default)]
-pub struct NativeBroadcasts(Mutex<Option<Running>>);
+pub struct NativeBroadcasts(Mutex<Option<Running>>, AtomicBool);
 
 impl NativeBroadcasts {
     pub fn is_active(&self) -> bool {
-        self.0.lock().map_or(true, |running| running.is_some())
+        self.1.load(Ordering::SeqCst) || self.0.lock().map_or(true, |running| running.is_some())
     }
 
     fn current(&self) -> Option<Arc<NativeBroadcast>> {
@@ -185,12 +187,20 @@ pub async fn switch_native_capture(
     state: State<'_, NativeBroadcasts>,
     request: SwitchNativeCapture,
 ) -> Result<Option<String>, String> {
-    let running = state
+    // Still a live while the switch has it out of the slot (the updater must not step in).
+    state.1.store(true, Ordering::SeqCst);
+    let taken = state
         .0
         .lock()
-        .map_err(|_| "O estado da transmissão está indisponível.".to_string())?
-        .take()
-        .ok_or_else(|| "Nenhuma transmissão ativa.".to_string())?;
+        .map_err(|_| "O estado da transmissão está indisponível.".to_string())
+        .and_then(|mut current| current.take().ok_or_else(|| "Nenhuma transmissão ativa.".to_string()));
+    let running = match taken {
+        Ok(running) => running,
+        Err(error) => {
+            state.1.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+    };
     log::info!(
         "switching native capture to video {}, audio {:?}, {} fps, max {}x{}, bitrate {:?}",
         request.video_source_id,
@@ -200,7 +210,7 @@ pub async fn switch_native_capture(
         request.max_height,
         request.bitrate
     );
-    let (running, outcome) = tauri::async_runtime::spawn_blocking(move || {
+    let switched = tauri::async_runtime::spawn_blocking(move || {
         let mut running = running;
         let fps = request.fps.clamp(15, MAX_FPS);
         let settings = windows_capture::VideoCaptureSettings::new(fps, request.cursor);
@@ -241,11 +251,18 @@ pub async fn switch_native_capture(
         }
         (running, outcome)
     })
-    .await
-    .map_err(|error| error.to_string())?;
+    .await;
+    let (running, outcome) = match switched {
+        Ok(result) => result,
+        Err(error) => {
+            state.1.store(false, Ordering::SeqCst);
+            return Err(error.to_string());
+        }
+    };
     if let Ok(mut current) = state.0.lock() {
         *current = Some(running);
     }
+    state.1.store(false, Ordering::SeqCst);
     outcome
 }
 

@@ -1,16 +1,20 @@
-//! Signed self-updates through tauri-plugin-updater, from the feed in tauri.conf.json (latest.json
-//! on the GitHub release, published by scripts/release.mjs). There are two moments only: once when
-//! the app starts, and when the user picks "Verificar atualizações" in the tray. Nothing is ever
-//! installed during a broadcast; an update that has to wait shows up in the app and in the tray.
-//! On Windows the NSIS installer runs passive and reopens the app when it is done.
+//! Silent signed self-updates through tauri-plugin-updater, from the feed in tauri.conf.json
+//! (latest.json on the GitHub release, published by scripts/release.mjs). The app checks when it
+//! starts, every ten minutes after that, and when the user picks "Verificar atualizações" in the
+//! tray. A downloaded update installs right away with no window at all (NSIS in quiet mode, which
+//! reopens the app; its window too if it was open) unless the user is broadcasting or watching a
+//! live: then it waits, and the next check installs it once both have stopped. Failures show up as
+//! the app's own notices, without repeating the same one over and over.
 
 use std::{
+    fs,
+    path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -20,9 +24,21 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use crate::{native_broadcast::NativeBroadcasts, windows_audio::AudioCaptures, windows_capture::VideoCaptures};
 
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(15);
+const CHECK_INTERVAL: Duration = Duration::from_secs(10 * 60);
+// The same failure is noticed again only after this long.
+const NOTICE_REPEAT_AFTER: Duration = Duration::from_secs(60 * 60);
+// A check that fails right after boot is usually the network not being up yet: only a failure in
+// a row this many times is worth a notice.
+const CHECK_FAILURES_BEFORE_NOTICE: u32 = 2;
+// Written before a silent install while the window is open, so the restarted app opens it again.
+const REOPEN_MARKER: &str = "reopen-after-update";
 
-/// One check at a time: the startup one and a tray click can overlap.
+/// One check at a time: the periodic one and a tray click can overlap.
 static CHECKING: AtomicBool = AtomicBool::new(false);
+/// A live is on screen in this app (the page reports it through `set_watching`).
+static WATCHING: AtomicBool = AtomicBool::new(false);
+static CHECK_FAILURES: AtomicU32 = AtomicU32::new(0);
+static LAST_ERROR_NOTICE: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,7 +68,7 @@ impl ReadyUpdate {
     }
 }
 
-/// The downloaded, signature-checked installer waiting for a moment without a broadcast.
+/// The downloaded, signature-checked installer waiting for the user to stop broadcasting/watching.
 #[derive(Default)]
 pub struct PendingUpdate(Mutex<Option<ReadyUpdate>>);
 
@@ -81,7 +97,7 @@ impl TrayItem {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Trigger {
-    Startup,
+    Background,
     Tray,
 }
 
@@ -93,7 +109,10 @@ pub fn start(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(STARTUP_CHECK_DELAY);
-        run(&app, Trigger::Startup);
+        loop {
+            run(&app, Trigger::Background);
+            thread::sleep(CHECK_INTERVAL);
+        }
     });
 }
 
@@ -103,11 +122,19 @@ pub fn tray_clicked(app: &AppHandle) {
     // Off the main thread: checking and downloading block, and the tray must stay responsive.
     thread::spawn(move || {
         if pending_info(&app).is_some() {
-            install_or_explain(&app);
+            if let Err(error) = install(&app) {
+                log::error!("{error}");
+                notify(&app, "Não deu para atualizar", &install_failure_message(&app));
+            }
         } else {
             run(&app, Trigger::Tray);
         }
     });
+}
+
+/// Broadcasting or watching: the moments an update must not interrupt.
+fn busy(app: &AppHandle) -> bool {
+    broadcasting(app) || WATCHING.load(Ordering::SeqCst)
 }
 
 fn run(app: &AppHandle, trigger: Trigger) {
@@ -115,41 +142,57 @@ fn run(app: &AppHandle, trigger: Trigger) {
         return;
     }
     let tray = trigger == Trigger::Tray;
-    set_tray(app, TrayItem::Checking);
+    // An update that waited for the user to stop goes in as soon as they have.
+    if let Some(info) = pending_info(app) {
+        CHECKING.store(false, Ordering::SeqCst);
+        if !busy(app) {
+            log::info!("installing the waiting update {}", info.version);
+            if let Err(error) = install(app) {
+                log::error!("{error}");
+                notify_error(app, "Não deu para atualizar", &install_failure_message(app));
+            }
+        }
+        return;
+    }
+    if tray {
+        set_tray(app, TrayItem::Checking);
+    }
     let found = tauri::async_runtime::block_on(find(app));
     let result = match found {
         Ok(Some(update)) => {
+            CHECK_FAILURES.store(0, Ordering::SeqCst);
+            log::info!("update {} found, downloading", update.version);
             set_tray(app, TrayItem::Downloading(update.version.clone()));
-            if tray {
-                let message = if broadcasting(app) {
-                    "Baixando agora."
-                } else {
-                    "Baixando agora. O app reinicia sozinho quando terminar."
-                };
-                notify(app, &format!("Versão {} encontrada", update.version), message);
-            }
             tauri::async_runtime::block_on(download(app, update)).map(Some)
         }
-        Ok(None) => Ok(None),
-        Err(error) => Err(error),
+        Ok(None) => {
+            CHECK_FAILURES.store(0, Ordering::SeqCst);
+            Ok(None)
+        }
+        Err(error) => {
+            let failures = CHECK_FAILURES.fetch_add(1, Ordering::SeqCst) + 1;
+            Err((error, failures))
+        }
     };
     CHECKING.store(false, Ordering::SeqCst);
 
     match result {
         Ok(Some(info)) => {
-            // At startup only when the app is sitting in the tray; from the tray it was asked for.
-            let idle = !broadcasting(app) && (tray || !main_window_visible(app));
-            if idle {
-                install_or_explain(app);
-            } else {
+            if busy(app) {
+                // Installs at the next check after the live (broadcast or watched) is over.
+                log::info!("update {} waits for the live to end", info.version);
                 announce(app, &info);
                 if tray {
                     notify(
                         app,
-                        &format!("Versão {} pronta", info.version),
-                        "Encerre a transmissão e escolha \"Atualizar\" no tray.",
+                        &format!("Versão {} baixada", info.version),
+                        "Ela entra sozinha quando você parar de transmitir e de assistir.",
                     );
                 }
+            } else if let Err(error) = install(app) {
+                log::error!("{error}");
+                announce(app, &info);
+                notify_error(app, "Não deu para atualizar", &install_failure_message(app));
             }
         }
         Ok(None) => {
@@ -159,13 +202,25 @@ fn run(app: &AppHandle, trigger: Trigger) {
                 notify(app, "Nenhuma atualização", &format!("Você já está na versão {current}."));
             }
         }
-        Err(error) => {
-            eprintln!("{error}");
+        Err((error, failures)) => {
+            log::error!("{error}");
             set_tray(app, TrayItem::Check);
             if tray {
                 notify(app, "Não deu para verificar", "Confira a conexão e tente de novo.");
+            } else if error.starts_with("Could not download") {
+                notify_error(app, "Não deu para atualizar", "O download da atualização falhou. O app tenta de novo daqui a pouco.");
+            } else if failures >= CHECK_FAILURES_BEFORE_NOTICE {
+                notify_error(app, "Não deu para procurar atualizações", "Confira a conexão. O app tenta de novo a cada 10 minutos.");
             }
         }
+    }
+}
+
+fn install_failure_message(app: &AppHandle) -> String {
+    if broadcasting(app) {
+        "Ela entra sozinha quando a transmissão terminar.".to_string()
+    } else {
+        "O app tenta de novo daqui a pouco, ou pelo tray.".to_string()
     }
 }
 
@@ -177,7 +232,7 @@ async fn find(app: &AppHandle) -> Result<Option<Update>, String> {
         .map_err(|error| format!("Could not check for updates: {error}"))
 }
 
-async fn download(app: &AppHandle, update: Update) -> Result<UpdateInfo, String> {
+async fn download(app: &AppHandle, update: Update) -> Result<UpdateInfo, (String, u32)> {
     let pending = app.state::<PendingUpdate>();
     if let Some(ready) = pending.0.lock().ok().as_deref().and_then(Option::as_ref) {
         if ready.update.version == update.version {
@@ -188,30 +243,14 @@ async fn download(app: &AppHandle, update: Update) -> Result<UpdateInfo, String>
     let bytes = update
         .download(|_, _| {}, || {})
         .await
-        .map_err(|error| format!("Could not download the update: {error}"))?;
+        .map_err(|error| (format!("Could not download the update: {error}"), 1))?;
     let ready = ReadyUpdate { update, bytes };
     let info = ready.info();
     *pending
         .0
         .lock()
-        .map_err(|_| "Update state is unavailable".to_string())? = Some(ready);
+        .map_err(|_| ("Could not download the update: state is unavailable".to_string(), 1))? = Some(ready);
     Ok(info)
-}
-
-fn install_or_explain(app: &AppHandle) {
-    let Some(info) = pending_info(app) else {
-        return;
-    };
-    if let Err(error) = install(app) {
-        eprintln!("{error}");
-        announce(app, &info);
-        let message = if broadcasting(app) {
-            "Encerre a transmissão e escolha \"Atualizar\" no tray."
-        } else {
-            "Tente de novo pelo tray."
-        };
-        notify(app, &format!("Versão {} pronta", info.version), message);
-    }
 }
 
 fn announce(app: &AppHandle, info: &UpdateInfo) {
@@ -227,9 +266,21 @@ fn notify(app: &AppHandle, title: &str, message: &str) {
     let _ = app.emit_to("main", "update-notice", notice);
 }
 
+/// A failure nobody asked about: noticed once, then again only after a while.
+fn notify_error(app: &AppHandle, title: &str, message: &str) {
+    let key = format!("{title}|{message}");
+    if let Ok(mut last) = LAST_ERROR_NOTICE.lock() {
+        if last.as_ref().is_some_and(|(previous, at)| *previous == key && at.elapsed() < NOTICE_REPEAT_AFTER) {
+            return;
+        }
+        *last = Some((key, Instant::now()));
+    }
+    notify(app, title, message);
+}
+
 fn set_tray(app: &AppHandle, item: TrayItem) {
     if let Err(error) = crate::refresh_tray_menu(app, &item) {
-        eprintln!("Could not update the tray menu: {error}");
+        log::warn!("Could not update the tray menu: {error}");
     }
 }
 
@@ -253,6 +304,20 @@ fn broadcasting(app: &AppHandle) -> bool {
         || app.state::<NativeBroadcasts>().is_active()
 }
 
+fn reopen_marker(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join(REOPEN_MARKER))
+}
+
+/// At startup: an app restarted by a silent update while its window was open opens it again.
+pub fn reopen_window_after_update(app: &AppHandle) -> bool {
+    let Some(marker) = reopen_marker(app) else { return false };
+    if fs::remove_file(&marker).is_ok() {
+        log::info!("reopening the window after an update");
+        return true;
+    }
+    false
+}
+
 /// Runs the downloaded installer. On Windows this ends the process (the installer reopens it).
 pub fn install(app: &AppHandle) -> Result<(), String> {
     if cfg!(debug_assertions) {
@@ -268,10 +333,21 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         .lock()
         .map_err(|_| "Update state is unavailable".to_string())?;
     let ready = slot.as_ref().ok_or("No update has been downloaded")?;
-    ready
-        .update
-        .install(&ready.bytes)
-        .map_err(|error| format!("Could not install the update: {error}"))?;
+    if main_window_visible(app) {
+        if let Some(marker) = reopen_marker(app) {
+            let _ = marker.parent().map(fs::create_dir_all);
+            let _ = fs::write(&marker, b"");
+        }
+    }
+    log::info!("installing update {} silently", ready.update.version);
+    log::logger().flush();
+    let result = ready.update.install(&ready.bytes);
+    if let Err(error) = result {
+        if let Some(marker) = reopen_marker(app) {
+            let _ = fs::remove_file(marker);
+        }
+        return Err(format!("Could not install the update: {error}"));
+    }
     drop(slot);
     // macOS and Linux replace the app in place and need the restart themselves.
     app.restart()
@@ -289,4 +365,10 @@ pub fn get_ready_update(pending: State<'_, PendingUpdate>) -> Option<UpdateInfo>
 #[tauri::command]
 pub fn install_ready_update(app: AppHandle) -> Result<(), String> {
     install(&app)
+}
+
+/// The page has a live on screen (or no longer does): an update waits while it does.
+#[tauri::command]
+pub fn set_watching(watching: bool) {
+    WATCHING.store(watching, Ordering::SeqCst);
 }

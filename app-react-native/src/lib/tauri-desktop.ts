@@ -153,6 +153,7 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
         showLiveToast: (toast: DesktopLiveToast) => invoke<void>("show_live_toast", { toast }),
         getReadyUpdate: () => invoke<DesktopUpdate | null>("get_ready_update"),
         installUpdate: () => invoke<void>("install_ready_update"),
+        setWatching: (watching: boolean) => invoke<void>("set_watching", { watching }),
         onUpdateReady: (callback: (update: DesktopUpdate) => void) => {
             let active = true;
             let unlisten: (() => void) | undefined;

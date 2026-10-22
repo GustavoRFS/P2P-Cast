@@ -902,6 +902,7 @@ pub fn run() {
             open_live_from_toast,
             updates::get_ready_update,
             updates::install_ready_update,
+            updates::set_watching,
         ])
         .on_window_event(|window, event| {
             // Closing the window would end the process and unregister the shortcuts; keep the app
@@ -918,6 +919,9 @@ pub fn run() {
             build_tray(app.handle())?;
             if let Err(error) = ensure_toast_window(app.handle()) {
                 eprintln!("{error}");
+            }
+            if updates::reopen_window_after_update(app.handle()) {
+                show_main_window(app.handle());
             }
             updates::start(app.handle());
             Ok(())
