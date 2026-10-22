@@ -74,6 +74,38 @@ declare global {
         message: string;
     }
 
+    /** A direct-capture live sent by the app itself, encoded once for every viewer. */
+    interface DesktopNativeBroadcastRequest {
+        /** The saved broadcast id, so links shared earlier keep working. */
+        peerId: string | null;
+        videoSourceId: string;
+        /** "system" or a window target; null for no audio. */
+        audioSourceId: string | null;
+        fps: number;
+        cursor: "always" | "motion" | "never";
+        /** The profile's resolution as a bounding box; 0 keeps the window's size. */
+        maxWidth: number;
+        maxHeight: number;
+        bitrate: number | null;
+        softwareEncoder?: boolean;
+    }
+
+    interface DesktopChatMessage {
+        id: string;
+        authorName: string;
+        text: string;
+        timestamp: number;
+        isBroadcaster: boolean;
+    }
+
+    type DesktopNativeBroadcastEvent =
+        | { type: "viewers"; count: number }
+        | { type: "chat"; message: DesktopChatMessage }
+        | { type: "encoder"; name: string; hardware: boolean; width: number; height: number; fps: number; bitrate: number }
+        | { type: "signalingLost" }
+        | { type: "signalingRestored" }
+        | { type: "fatal"; message: string };
+
     interface Window {
         p2pcastDesktop?: {
             getWindowSources(): Promise<DesktopWindowSource[]>;
@@ -89,6 +121,7 @@ declare global {
                 appOrigin: string;
                 isolatedAudioAvailable: boolean;
                 directVideoCaptureAvailable?: boolean;
+                nativeBroadcastAvailable?: boolean;
                 capturePicker: "window-list" | "system-window";
             }>;
             copyShareLink?(link: string): Promise<void>;
@@ -125,6 +158,12 @@ declare global {
             stopDirectVideoCapture?(captureId: string): Promise<void>;
             onDirectVideoFrame?(captureId: string, listener: (frame: { buffer: ArrayBuffer; width: number; height: number }) => void): () => void;
             onDirectVideoError?(captureId: string, listener: (message: string) => void): () => void;
+            /** Resolves once viewers can join, with the broadcast id the signaling server accepted. */
+            startNativeBroadcast?(request: DesktopNativeBroadcastRequest): Promise<{ peerId: string }>;
+            stopNativeBroadcast?(): Promise<void>;
+            sendNativeChat?(message: DesktopChatMessage): Promise<void>;
+            setNativeAudioMuted?(muted: boolean): Promise<void>;
+            onNativeBroadcastEvent?(listener: (event: DesktopNativeBroadcastEvent) => void): () => void;
         };
     }
 }

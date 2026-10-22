@@ -7,12 +7,38 @@ import { VideoStage } from "../../components/VideoStage";
 import { formatCaptureSettings } from "../../lib/capture";
 import { useBroadcast } from "./BroadcastProvider";
 import { mediaHasAudio } from "./media";
+import type { NativeSenderInfo } from "./types";
+
+function formatBitrate(bitrate: number): string {
+    return `${(bitrate / 1_000_000).toFixed(bitrate % 1_000_000 === 0 ? 0 : 1)} Mbps`;
+}
+
+/** In place of the local preview: the app is encoding and sending the live itself. */
+function NativeSenderStatus({ sender }: { sender: NativeSenderInfo }) {
+    const { encoder } = sender;
+    return (
+        <>
+            <Text className="text-[13px] font-extrabold text-ink">Enviando direto do app</Text>
+            {encoder ? (
+                <Text className="text-center text-[11px] text-muted">
+                    H.264 · {encoder.name} · {encoder.width}×{encoder.height} · {encoder.fps} fps · {formatBitrate(encoder.bitrate)}
+                </Text>
+            ) : (
+                <>
+                    <ActivityIndicator color="#75e5e0" />
+                    <Text className="text-[11px] text-muted">Preparando o codificador…</Text>
+                </>
+            )}
+            <Text className="text-center text-[11px] text-muted">A prévia fica desligada para não pesar no jogo.</Text>
+        </>
+    );
+}
 
 /** The live room for the broadcaster: local preview, viewers, chat and the share link. */
 export function BroadcastRoom() {
     const broadcast = useBroadcast();
-    const { localMedia, chat } = broadcast;
-    const hasAudio = mediaHasAudio(localMedia);
+    const { localMedia, chat, nativeSender } = broadcast;
+    const hasAudio = Boolean(nativeSender) || mediaHasAudio(localMedia);
 
     return (
         <Screen headerRight={<StatusPill mode={broadcast.mode} />}>
@@ -29,7 +55,7 @@ export function BroadcastRoom() {
                     <VideoStage
                         media={localMedia}
                         badge="LOCAL"
-                        placeholder={(
+                        placeholder={nativeSender ? <NativeSenderStatus sender={nativeSender} /> : (
                             <>
                                 <ActivityIndicator color="#75e5e0" />
                                 <Text className="text-[12px] text-muted">Aguardando o compartilhamento…</Text>

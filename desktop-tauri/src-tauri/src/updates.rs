@@ -17,7 +17,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-use crate::{windows_audio::AudioCaptures, windows_capture::VideoCaptures};
+use crate::{native_broadcast::NativeBroadcasts, windows_audio::AudioCaptures, windows_capture::VideoCaptures};
 
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(15);
 
@@ -248,7 +248,9 @@ fn main_window_visible(app: &AppHandle) -> bool {
 }
 
 fn broadcasting(app: &AppHandle) -> bool {
-    app.state::<VideoCaptures>().is_active() || app.state::<AudioCaptures>().is_active()
+    app.state::<VideoCaptures>().is_active()
+        || app.state::<AudioCaptures>().is_active()
+        || app.state::<NativeBroadcasts>().is_active()
 }
 
 /// Runs the downloaded installer. On Windows this ends the process (the installer reopens it).

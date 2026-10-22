@@ -3,12 +3,12 @@ use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Read},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -100,11 +100,8 @@ fn emit_audio(app: &AppHandle, capture_id: &str, chunk: Vec<u8>) {
 
 const SYSTEM_AUDIO_SOURCE: &str = "system";
 
-pub fn start(
-    app: AppHandle,
-    state: &AudioCaptures,
-    source_id: String,
-) -> Result<AudioStarted, String> {
+/// Starts the audio helper for a source and checks the format it announces.
+fn spawn_helper(app: &AppHandle, source_id: &str) -> Result<(Child, BufReader<ChildStdout>), String> {
     // "system" is a whole monitor: every sound on the PC except Discord (see the helper).
     let helper_argument = if source_id == SYSTEM_AUDIO_SOURCE {
         "--system".to_string()
@@ -121,7 +118,7 @@ pub fn start(
         format!("0x{raw_handle}")
     };
 
-    let mut command = Command::new(helper_path(&app)?);
+    let mut command = Command::new(helper_path(app)?);
     command
         .arg(helper_argument)
         .stdin(Stdio::null())
@@ -175,7 +172,15 @@ pub fn start(
             "The audio helper returned an unsupported audio format.",
         ));
     }
+    Ok((child, reader))
+}
 
+pub fn start(
+    app: AppHandle,
+    state: &AudioCaptures,
+    source_id: String,
+) -> Result<AudioStarted, String> {
+    let (child, reader) = spawn_helper(&app, &source_id)?;
     let capture_id = format!(
         "tauri-audio-{}",
         state.next_id.fetch_add(1, Ordering::Relaxed) + 1
@@ -287,6 +292,73 @@ pub fn stop(state: &AudioCaptures, capture_id: &str) -> Result<(), String> {
     let _ = capture.child.kill();
     let _ = capture.child.wait();
     Ok(())
+}
+
+/// The audio helper feeding the native sender's Opus encoder directly.
+pub struct NativeAudioCapture {
+    child: Child,
+    stopped: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+pub fn start_native(
+    app: &AppHandle,
+    source_id: &str,
+    input: p2pcast_native_broadcast::AudioInput,
+    on_error: Box<dyn Fn(String) + Send>,
+) -> Result<NativeAudioCapture, String> {
+    let (child, mut reader) = spawn_helper(app, source_id)?;
+    let stopped = Arc::new(AtomicBool::new(false));
+    let worker_stopped = stopped.clone();
+    let worker = thread::spawn(move || {
+        let mut buffer = vec![0u8; 16 * 1024];
+        let mut remainder = Vec::new();
+        let mut samples = Vec::new();
+        let failure = loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break "A captura de áudio terminou.".to_string(),
+                Ok(count) => {
+                    remainder.extend_from_slice(&buffer[..count]);
+                    // Whole stereo frames only: two little-endian f32 each.
+                    let aligned = remainder.len() - remainder.len() % 8;
+                    samples.clear();
+                    samples.extend(
+                        remainder[..aligned]
+                            .chunks_exact(4)
+                            .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+                    );
+                    remainder.drain(..aligned);
+                    input.push_interleaved(&samples);
+                }
+                Err(error) => break format!("A captura de áudio falhou: {error}"),
+            }
+        };
+        if !worker_stopped.load(Ordering::Acquire) {
+            on_error(failure);
+        }
+    });
+    Ok(NativeAudioCapture {
+        child,
+        stopped,
+        worker: Some(worker),
+    })
+}
+
+impl NativeAudioCapture {
+    pub fn stop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for NativeAudioCapture {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 impl Drop for AudioCaptures {

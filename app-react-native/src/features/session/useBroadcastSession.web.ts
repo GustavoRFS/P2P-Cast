@@ -9,6 +9,7 @@ import {
     loadCaptureSettings,
     saveCaptureSettings,
     setCaptureAudioEnabled,
+    RESOLUTION_OPTIONS,
     type CaptureSettings,
     type CaptureTrackSource,
 } from "../../lib/capture";
@@ -24,6 +25,7 @@ import {
     getDesktopConfig,
     isDesktopApp,
     listDesktopCaptureTargets,
+    nativeBroadcastEnabled,
     refreshDesktopCapture,
     releaseDesktopCapture,
     resolveDesktopCaptureTarget,
@@ -35,10 +37,15 @@ import { loadShortcutProfiles, SYSTEM_AUDIO_SOURCE, type ShortcutProfile } from 
 import { getMediaError, getPeerError } from "../../lib/status";
 import type { AppError, StreamMode } from "../../lib/types";
 import { writeClipboardText } from "../../platform/clipboard";
-import type { BroadcastSession } from "./types";
+import type { BroadcastSession, NativeSenderInfo } from "./types";
 import { useChatCore } from "./useChatCore";
 
 const MAX_MEDIA_CONNECTIONS_PER_SESSION = 2;
+
+const SIGNALING_LOST: AppError = {
+    title: "Sinalização desconectada",
+    message: "Quem já está assistindo continua; novos espectadores entram assim que a conexão voltar.",
+};
 
 type CaptureStreams = Record<CaptureTrackSource, MediaStream | null>;
 
@@ -90,6 +97,11 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
     const [viewerCount, setViewerCount] = useState(0);
     const [copied, setCopied] = useState(false);
     const [audioMuted, setAudioMuted] = useState(false);
+    const [nativeSender, setNativeSender] = useState<NativeSenderInfo | null>(null);
+    // The desktop app sends this live itself: no PeerJS peer or local streams on this page.
+    const nativeRef = useRef(false);
+    // Bumped by stop(), so a native start that resolves after the live was ended is undone.
+    const stopCountRef = useRef(0);
     const chat = useChatCore();
     const { pushSelf, pushIncoming, reset: resetChat } = chat;
     const localStreamsRef = useRef<CaptureStreams>(EMPTY_STREAMS);
@@ -135,6 +147,10 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
 
         const message = buildChatMessage({ text: sanitized, authorName: "Transmissor", isBroadcaster: true });
         pushSelf(message);
+        if (nativeRef.current) {
+            void window.p2pcastDesktop?.sendNativeChat?.(message).catch(() => undefined);
+            return;
+        }
         chatConnectionsRef.current.forEach(conn => {
             if (conn.open) conn.send(message);
         });
@@ -146,6 +162,12 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
 
     const stop = useCallback(() => {
         setLivePeer?.(null);
+        stopCountRef.current += 1;
+        if (nativeRef.current) {
+            nativeRef.current = false;
+            void window.p2pcastDesktop?.stopNativeBroadcast?.().catch(() => undefined);
+        }
+        setNativeSender(null);
         const peer = peerRef.current;
         peerRef.current = null;
 
@@ -192,6 +214,44 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
             }
             if (sources.includes("camera") && !navigator.mediaDevices?.getUserMedia) {
                 throw new TypeError("Camera capture is not supported");
+            }
+
+            if (sources.includes("screen") && desktopMode && profile?.captureMethod === "direct" && sourceId
+                && desktopConfig?.nativeBroadcastAvailable && window.p2pcastDesktop?.startNativeBroadcast
+                && nativeBroadcastEnabled()) {
+                // The app captures, encodes once (on the GPU when it can) and serves every viewer.
+                try {
+                    const stopCount = stopCountRef.current;
+                    const resolution = RESOLUTION_OPTIONS.find(option => option.value === nextSettings.resolution);
+                    const { peerId } = await window.p2pcastDesktop.startNativeBroadcast({
+                        peerId: loadBroadcastId(),
+                        videoSourceId: sourceId,
+                        audioSourceId: nextSettings.audio ? audioSourceId ?? null : null,
+                        fps: nextSettings.fps,
+                        cursor: nextSettings.cursor,
+                        maxWidth: resolution?.width ?? 0,
+                        maxHeight: resolution?.height ?? 0,
+                        bitrate: nextSettings.bitrate,
+                    });
+                    if (stopCountRef.current !== stopCount) {
+                        void window.p2pcastDesktop.stopNativeBroadcast?.().catch(() => undefined);
+                        return;
+                    }
+                    nativeRef.current = true;
+                    saveBroadcastId(peerId);
+                    const watchUrl = buildWatchUrl(desktopConfig.webUrl ?? window.location.origin, "/", peerId);
+                    setShareUrl(watchUrl);
+                    void writeClipboardText(watchUrl).then(() => setCopied(true)).catch(() => undefined);
+                    setNativeSender({ encoder: null });
+                    setViewerCount(0);
+                    setLivePeer?.(peerId);
+                    setMode("broadcasting");
+                    return;
+                } catch (nativeError) {
+                    // Fall back to the webview pipeline below, which still works everywhere.
+                    recordCaptureFailure("nativeBroadcast", nativeError);
+                    console.warn("Native sender unavailable, using the webview pipeline:", nativeError);
+                }
             }
 
             if (sources.includes("screen")) {
@@ -425,6 +485,38 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
         };
     }, [stop]);
 
+    // What the app's native sender reports about the live it is sending.
+    useEffect(() => {
+        if (!desktopMode || !window.p2pcastDesktop?.onNativeBroadcastEvent) return;
+        return window.p2pcastDesktop.onNativeBroadcastEvent(event => {
+            if (!nativeRef.current) return;
+            switch (event.type) {
+                case "viewers":
+                    setViewerCount(event.count);
+                    break;
+                case "chat":
+                    pushIncoming(event.message);
+                    break;
+                case "encoder": {
+                    const { name, hardware, width, height, fps, bitrate } = event;
+                    setNativeSender({ encoder: { name, hardware, width, height, fps, bitrate } });
+                    break;
+                }
+                case "signalingLost":
+                    setError(SIGNALING_LOST);
+                    break;
+                case "signalingRestored":
+                    setError(current => (current === SIGNALING_LOST ? null : current));
+                    break;
+                case "fatal":
+                    stop();
+                    setError({ title: "A transmissão parou", message: event.message });
+                    setMode("error");
+                    break;
+            }
+        });
+    }, [desktopMode, pushIncoming, stop]);
+
     useEffect(() => {
         saveCaptureSettings(settings);
     }, [settings]);
@@ -433,6 +525,7 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
 
     const toggleAudio = useCallback(() => {
         const nextMuted = !audioMuted;
+        if (nativeRef.current) void window.p2pcastDesktop?.setNativeAudioMuted?.(nextMuted).catch(() => undefined);
         setCaptureAudioEnabled(Object.values(localStreamsRef.current), !nextMuted);
         setAudioMuted(nextMuted);
     }, [audioMuted]);
@@ -525,5 +618,6 @@ export function useBroadcastSession(setLivePeer?: (peerId: string | null) => voi
                 setShortcutProfiles,
             }
             : null,
+        nativeSender,
     };
 }

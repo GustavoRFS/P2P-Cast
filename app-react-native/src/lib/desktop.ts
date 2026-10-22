@@ -15,10 +15,22 @@ export type DesktopConfig = {
     appOrigin: string;
     isolatedAudioAvailable: boolean;
     directVideoCaptureAvailable?: boolean;
+    nativeBroadcastAvailable?: boolean;
     capturePicker: "window-list" | "system-window";
 };
 
 const desktopCaptureReleases = new WeakMap<MediaStream, () => void>();
+
+/** Set to "off" to send direct captures through the webview again (the pre-0.4 pipeline). */
+export const NATIVE_BROADCAST_STORAGE_KEY = "p2pcast.native-broadcast";
+
+export function nativeBroadcastEnabled(): boolean {
+    try {
+        return window.localStorage.getItem(NATIVE_BROADCAST_STORAGE_KEY) !== "off";
+    } catch {
+        return true;
+    }
+}
 const desktopCaptureRefreshers = new WeakMap<MediaStream, () => void>();
 
 // WGC only reports a frame when the window changes, and the canvas track only carries the frames it

@@ -10,6 +10,7 @@ type TauriDesktopConfig = {
     webUrl: string;
     isolatedAudioAvailable: boolean;
     directVideoCaptureAvailable: boolean;
+    nativeBroadcastAvailable: boolean;
     capturePicker: "system-window";
 };
 
@@ -269,6 +270,23 @@ export async function initializeTauriDesktopBridge(): Promise<void> {
             return () => {
                 callbacks.delete(callback);
                 if (callbacks.size === 0) directVideoFrameListeners.delete(captureId);
+            };
+        },
+        startNativeBroadcast: (request: DesktopNativeBroadcastRequest) =>
+            invoke<{ peerId: string }>("start_native_broadcast", { request }),
+        stopNativeBroadcast: () => invoke<void>("stop_native_broadcast"),
+        sendNativeChat: (message: DesktopChatMessage) => invoke<void>("send_native_chat", { message }),
+        setNativeAudioMuted: (muted: boolean) => invoke<void>("set_native_audio_muted", { muted }),
+        onNativeBroadcastEvent: (callback: (event: DesktopNativeBroadcastEvent) => void) => {
+            let active = true;
+            let unlisten: (() => void) | undefined;
+            void listen<DesktopNativeBroadcastEvent>("native-broadcast", event => callback(event.payload)).then(remove => {
+                if (active) unlisten = remove;
+                else remove();
+            });
+            return () => {
+                active = false;
+                unlisten?.();
             };
         },
         onDirectVideoError: (captureId: string, callback: (message: string) => void) => {

@@ -6,4 +6,7 @@ node_modules
 .worktrees/
 desktop-tauri/config.json
 desktop-tauri/src-tauri/target/
+# Standalone builds of the native sender (its tests and examples); the app uses src-tauri's lock.
+desktop-tauri/native-broadcast/target/
+desktop-tauri/native-broadcast/Cargo.lock
 desktop-tauri/src-tauri/gen/

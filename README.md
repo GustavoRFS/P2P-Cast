@@ -105,6 +105,19 @@ Para gerar um instalador no sistema atual, use `npm run build`; para escolher um
 
 O Tauri lista janelas e monitores e oferece dois métodos nos perfis de atalho: captura direta por Windows Graphics Capture (WGC), que usa o alvo salvo, e o seletor do Windows, que pede uma escolha a cada início. A captura WGC está disponível quando o helper nativo foi compilado e incluído no pacote; requer Windows 10 versão 1903 ou posterior. Os perfis guardam o alvo de vídeo, o programa de áudio e a combinação global; o áudio usa o helper WASAPI e nunca usa loopback global.
 
+### Envio nativo
+
+Nos perfis de captura direta (WGC), o próprio app envia a live desde a 0.4, sem passar pelo WebView: `desktop-tauri/native-broadcast` recebe os quadros do helper WGC e o PCM do helper WASAPI, codifica uma vez só e serve cada espectador com sua própria conexão WebRTC, falando o mesmo protocolo do PeerJS. Os espectadores (web, desktop, Android) não mudam.
+
+- **Vídeo:** H.264 Constrained Baseline. Usa o codificador da GPU que o Media Foundation encontrar (NVENC, AMD, Quick Sync) e cai para o openh264 (CPU) se não houver um ou se ele falhar. Teto de 60 fps; a resolução do perfil limita o tamanho; sem bitrate no perfil, ele é calculado pela resolução e pelo fps. Com a tela parada, o último quadro é reenviado uma vez por segundo, e cada espectador que entra pede um quadro-chave.
+- **Áudio:** Opus estéreo a 128 kbps, em quadros de 20 ms.
+- **RTP:** o timestamp de cada quadro vem da hora da captura, então uma pausa da imagem não vira atraso no player de quem assiste.
+- **Chat:** BinaryPack para os navegadores e JSON para o app Android, como o PeerJS.
+- **Na tela da live:** no lugar da prévia aparece o codificador em uso, a resolução, o fps e a taxa.
+- **Volta ao caminho antigo:** se o envio nativo não iniciar, o app usa o pipeline do WebView. Para forçar o caminho antigo, rode `localStorage.setItem("p2pcast.native-broadcast", "off")` no console do app.
+
+No `ligma`, `cargo test` em `desktop-tauri/native-broadcast` roda os testes do crate, e `cargo run --release --example synthetic` abre uma live sintética (barras coloridas e um tom de 440 Hz, openh264) que qualquer espectador pode assistir.
+
 Antes de empacotar no Windows, compile os dois helpers nativos em `desktop/` com `npm run build:audio:windows`. O comando gera e copia `desktop/resources/p2pcast-process-audio.exe` e `desktop/resources/p2pcast-wgc-capture.exe`; o pacote Tauri inclui ambos. A integração WGC e o build de frontend passam nas verificações disponíveis aqui, mas a compilação dos helpers e a captura/teardown precisam de validação em uma máquina Windows. Para comparar desempenho, rode Electron e Tauri no mesmo computador com resolução, FPS, bitrate, conta e número de espectadores iguais.
 
 ### Atualizações do desktop

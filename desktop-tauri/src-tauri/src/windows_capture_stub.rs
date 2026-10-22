@@ -54,3 +54,25 @@ pub fn acknowledge(_captures: &VideoCaptures, _capture_id: &str) -> Result<(), S
 pub fn stop(_captures: &VideoCaptures, _capture_id: &str) -> Result<(), String> {
     Ok(())
 }
+
+impl VideoCaptureSettings {
+    pub fn new(fps: u32, cursor: String) -> Self {
+        Self { fps, cursor }
+    }
+}
+
+pub struct NativeVideoCapture;
+
+impl NativeVideoCapture {
+    pub fn stop(&mut self) {}
+}
+
+pub fn start_native(
+    _app: &tauri::AppHandle,
+    _source_id: &str,
+    _settings: &VideoCaptureSettings,
+    _input: p2pcast_native_broadcast::VideoInput,
+    _on_error: Box<dyn Fn(String) + Send>,
+) -> Result<NativeVideoCapture, String> {
+    Err("Direct Windows Graphics Capture is only available on Windows.".to_string())
+}

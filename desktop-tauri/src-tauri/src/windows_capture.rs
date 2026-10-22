@@ -58,6 +58,12 @@ pub struct VideoCaptureSettings {
     cursor: String,
 }
 
+impl VideoCaptureSettings {
+    pub fn new(fps: u32, cursor: String) -> Self {
+        Self { fps, cursor }
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct VideoErrorEvent {
@@ -95,6 +101,23 @@ impl VideoCaptures {
     }
 }
 
+/// Width, height and byte length of the frame a header announces, if it is a valid one.
+fn parse_frame_header(header: &[u8; 16]) -> Option<(u32, u32, usize)> {
+    let magic = u32::from_le_bytes(header[0..4].try_into().unwrap());
+    let width = u32::from_le_bytes(header[4..8].try_into().unwrap());
+    let height = u32::from_le_bytes(header[8..12].try_into().unwrap());
+    let byte_length = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
+    let expected_length = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    let valid = magic == FRAME_MAGIC
+        && width != 0
+        && height != 0
+        && expected_length == Some(byte_length)
+        && byte_length <= MAX_FRAME_BYTES;
+    valid.then_some((width, height, byte_length))
+}
+
 fn emit_video_error(app: &AppHandle, capture_id: &str, message: impl Into<String>) {
     let _ = app.emit(
         "desktop-video-error",
@@ -105,12 +128,16 @@ fn emit_video_error(app: &AppHandle, capture_id: &str, message: impl Into<String
     );
 }
 
-pub fn start(
-    app: AppHandle,
-    captures: &VideoCaptures,
-    source_id: String,
-    settings: VideoCaptureSettings,
-) -> Result<VideoCaptureDescriptor, String> {
+struct Helper {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    width: u32,
+    height: u32,
+}
+
+/// Starts the WGC helper for a target and reads its handshake.
+fn spawn_helper(app: &AppHandle, source_id: &str, settings: &VideoCaptureSettings) -> Result<Helper, String> {
     if !(15..=240).contains(&settings.fps) {
         return Err("Requested capture frame rate is out of bounds.".to_string());
     }
@@ -130,7 +157,7 @@ pub fn start(
         _ => return Err("Invalid cursor capture setting.".to_string()),
     };
 
-    let mut command = Command::new(helper_path(&app)?);
+    let mut command = Command::new(helper_path(app)?);
     command
         .arg(kind)
         .arg(raw_handle)
@@ -184,7 +211,28 @@ pub fn start(
             "Windows capture helper returned unsupported video dimensions or format.",
         ));
     }
+    Ok(Helper {
+        child,
+        stdin,
+        stdout,
+        width: descriptor.width,
+        height: descriptor.height,
+    })
+}
 
+pub fn start(
+    app: AppHandle,
+    captures: &VideoCaptures,
+    source_id: String,
+    settings: VideoCaptureSettings,
+) -> Result<VideoCaptureDescriptor, String> {
+    let Helper {
+        mut child,
+        stdin,
+        stdout,
+        width,
+        height,
+    } = spawn_helper(&app, &source_id, &settings)?;
     let capture_id = format!(
         "tauri-video-{}",
         captures.next_id.fetch_add(1, Ordering::Relaxed) + 1
@@ -213,8 +261,8 @@ pub fn start(
 
     Ok(VideoCaptureDescriptor {
         capture_id,
-        width: descriptor.width,
-        height: descriptor.height,
+        width,
+        height,
         format: "rgba8",
     })
 }
@@ -260,26 +308,14 @@ pub fn resume(app: AppHandle, captures: &VideoCaptures, capture_id: &str) -> Res
                 }
                 break;
             }
-            let magic = u32::from_le_bytes(header_bytes[0..4].try_into().unwrap());
-            let width = u32::from_le_bytes(header_bytes[4..8].try_into().unwrap());
-            let height = u32::from_le_bytes(header_bytes[8..12].try_into().unwrap());
-            let byte_length = u32::from_le_bytes(header_bytes[12..16].try_into().unwrap()) as usize;
-            let expected_length = (width as usize)
-                .checked_mul(height as usize)
-                .and_then(|pixels| pixels.checked_mul(4));
-            if magic != FRAME_MAGIC
-                || width == 0
-                || height == 0
-                || expected_length != Some(byte_length)
-                || byte_length > MAX_FRAME_BYTES
-            {
+            let Some((width, height, byte_length)) = parse_frame_header(&header_bytes) else {
                 emit_video_error(
                     &app,
                     &worker_capture_id,
                     "The WGC helper returned an invalid frame.",
                 );
                 break;
-            }
+            };
             let mut frame = vec![0u8; byte_length];
             if let Err(error) = stdout.read_exact(&mut frame) {
                 if !stopped.load(Ordering::Acquire) {
@@ -387,6 +423,76 @@ fn post_shared_frame(
     receiver
         .recv_timeout(Duration::from_secs(4))
         .map_err(|_| "Timed out posting a shared frame to WebView2.".to_string())?
+}
+
+/// The WGC helper feeding the native sender: frames go straight to its encoder and never reach the
+/// webview.
+pub struct NativeVideoCapture {
+    child: Child,
+    stopped: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+pub fn start_native(
+    app: &AppHandle,
+    source_id: &str,
+    settings: &VideoCaptureSettings,
+    input: p2pcast_native_broadcast::VideoInput,
+    on_error: Box<dyn Fn(String) + Send>,
+) -> Result<NativeVideoCapture, String> {
+    let Helper {
+        child,
+        mut stdin,
+        mut stdout,
+        ..
+    } = spawn_helper(app, source_id, settings)?;
+    let stopped = Arc::new(AtomicBool::new(false));
+    let worker_stopped = stopped.clone();
+    let worker = thread::spawn(move || {
+        let mut header = [0u8; 16];
+        let failure = loop {
+            if let Err(error) = stdout.read_exact(&mut header) {
+                break format!("A captura de vídeo parou: {error}");
+            }
+            let Some((width, height, byte_length)) = parse_frame_header(&header) else {
+                break "A captura de vídeo devolveu um quadro inválido.".to_string();
+            };
+            let mut frame = input.buffer(byte_length);
+            if let Err(error) = stdout.read_exact(&mut frame) {
+                break format!("A captura de vídeo parou: {error}");
+            }
+            // Released right away: the helper grabs the next frame while this one is encoded.
+            if let Err(error) = stdin.write_all(&[1]).and_then(|()| stdin.flush()) {
+                break format!("A captura de vídeo parou: {error}");
+            }
+            input.push_rgba(width, height, frame);
+        };
+        if !worker_stopped.load(Ordering::Acquire) {
+            on_error(failure);
+        }
+    });
+    Ok(NativeVideoCapture {
+        child,
+        stopped,
+        worker: Some(worker),
+    })
+}
+
+impl NativeVideoCapture {
+    pub fn stop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for NativeVideoCapture {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 pub fn acknowledge(captures: &VideoCaptures, capture_id: &str) -> Result<(), String> {

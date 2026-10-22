@@ -2,7 +2,8 @@
 # Sets up a Linux box (the `ssh ligma` one) to build every P2P-Cast release without sudo: the Android
 # APK, the Windows desktop installer (cross-compiled with cargo-xwin) and an Android emulator for
 # tests. Needs git, node/npm, curl, unzip, clang/clang-cl, llvm-lib and llvm-rc already installed,
-# a JDK 17+ (JAVA_HOME below) and an Android SDK with cmdline-tools (ANDROID_HOME below).
+# a JDK 17+ (JAVA_HOME below) and an Android SDK with cmdline-tools (ANDROID_HOME below). The SDK's
+# CMake also builds libopus for the desktop's native sender.
 # Afterwards: `source ~/.p2pcast-build-env`, then `npm run release:android -- --no-publish` in
 # app-react-native and `npm run release -- --no-publish` in desktop-tauri. The signing keys are
 # not created here: copy ~/.android/p2pcast-release.{jks,properties} and ~/.tauri/p2p-cast-updater.key.
@@ -19,7 +20,7 @@ export JAVA_HOME="$JAVA_HOME"
 export ANDROID_HOME="$ANDROID_HOME"
 export ANDROID_SDK_ROOT="\$ANDROID_HOME"
 export NSISDIR="\$HOME/opt/nsis/usr/share/nsis"
-export PATH="\$JAVA_HOME/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/emulator:\$HOME/.cargo/bin:\$HOME/.local/bin:\$HOME/opt/nsis/usr/bin:\$PATH"
+export PATH="\$JAVA_HOME/bin:\$ANDROID_HOME/cmake/3.22.1/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/emulator:\$HOME/.cargo/bin:\$HOME/.local/bin:\$HOME/opt/nsis/usr/bin:\$PATH"
 EOF
 # shellcheck disable=SC1091
 source "$HOME/.p2pcast-build-env"
@@ -59,7 +60,7 @@ chmod +x "$HOME/.local/bin/makensis"
 # emulator (React Native's SoLoader looks for the device's primary ABI), so test builds add x86_64:
 # `./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64` in app-react-native/android.
 yes | sdkmanager --licenses > /dev/null || true
-sdkmanager --install "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+sdkmanager --install "emulator" "platform-tools" "cmake;3.22.1" "system-images;android-35;google_apis;x86_64"
 echo "no" | avdmanager create avd --force --name p2pcast-test \
     --package "system-images;android-35;google_apis;x86_64" --device "pixel_7"
 

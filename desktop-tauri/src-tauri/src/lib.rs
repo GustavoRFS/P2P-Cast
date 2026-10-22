@@ -21,6 +21,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+mod native_broadcast;
 mod updates;
 mod windows_audio;
 #[cfg(windows)]
@@ -57,6 +58,9 @@ struct DesktopConfig {
     web_url: String,
     isolated_audio_available: bool,
     direct_video_capture_available: bool,
+    /// Direct captures can be encoded and sent by the app itself (native-broadcast) instead of
+    /// the webview.
+    native_broadcast_available: bool,
     capture_picker: &'static str,
 }
 
@@ -169,6 +173,7 @@ fn get_desktop_config(app: &AppHandle) -> Result<DesktopConfig, String> {
         web_url: normalized_origin(&web_raw, "webUrl")?,
         isolated_audio_available: windows_audio::AudioCaptures::is_available(app),
         direct_video_capture_available: windows_capture::VideoCaptures::is_available(app),
+        native_broadcast_available: windows_capture::VideoCaptures::is_available(app),
         capture_picker: "system-window",
     })
 }
@@ -820,6 +825,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(windows_audio::AudioCaptures::default())
         .manage(windows_capture::VideoCaptures::default())
+        .manage(native_broadcast::NativeBroadcasts::default())
         .manage(PendingLiveToast::default())
         .manage(updates::PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
@@ -833,6 +839,10 @@ pub fn run() {
             resume_direct_video_capture,
             acknowledge_direct_video_frame,
             stop_direct_video_capture,
+            native_broadcast::start_native_broadcast,
+            native_broadcast::stop_native_broadcast,
+            native_broadcast::send_native_chat,
+            native_broadcast::set_native_audio_muted,
             get_saved_session,
             save_session,
             clear_session,

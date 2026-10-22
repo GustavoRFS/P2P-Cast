@@ -31,6 +31,12 @@ export type ChatState = {
     setName?(name: string): void;
 };
 
+/** A live the desktop app encodes and sends itself (direct capture), with no local preview. */
+export type NativeSenderInfo = {
+    /** Known once the first frame is encoded. */
+    encoder: { name: string; hardware: boolean; width: number; height: number; fps: number; bitrate: number } | null;
+};
+
 export type DesktopState = {
     config: DesktopConfig | null;
     captureTargets: DesktopCaptureTarget[];
@@ -59,6 +65,8 @@ export type BroadcastSession = {
     copyShareUrl(): Promise<void>;
     /** Present only inside the Tauri shell. */
     desktop: DesktopState | null;
+    /** Set while the desktop app sends the live natively. */
+    nativeSender?: NativeSenderInfo | null;
 };
 
 export type ViewerSession = {
