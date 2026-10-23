@@ -34,6 +34,10 @@ mod windows_capture;
 mod windows_targets;
 #[cfg(windows)]
 mod demo_launcher;
+#[cfg(windows)]
+mod demo_download;
+#[cfg(windows)]
+mod demo_storage;
 
 const KEYRING_SERVICE: &str = "com.p2pcast.desktop.tauri";
 const SESSION_KEY: &str = "discord-session";
@@ -917,8 +921,8 @@ pub fn run() {
         .setup(|app| {
             app_log::init(app.handle());
             #[cfg(windows)]
-            if let Err(error) = demo_launcher::start() {
-                eprintln!("Could not start the GC demo listener: {error}");
+            if let Err(error) = demo_launcher::start(app.handle().clone()) {
+                log::error!("Could not start the GC demo listener: {error}");
             }
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             app.deep_link().register_all()?;

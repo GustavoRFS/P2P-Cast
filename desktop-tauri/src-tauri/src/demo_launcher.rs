@@ -5,11 +5,13 @@ use std::{
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     ptr::null_mut,
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
 use serde::Deserialize;
+use tauri::{AppHandle, Manager};
 use windows_sys::core::BOOL;
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HWND, TRUE},
@@ -31,16 +33,27 @@ use windows_sys::Win32::{
 
 const PORT: u16 = 43172;
 const ENDPOINT: &str = "/v1/playdemo";
+const DOWNLOAD_ENDPOINT: &str = "/v1/download-demo";
 const HEALTH_ENDPOINT: &str = "/health";
 const GC_ORIGIN: &str = "https://gamersclub.com.br";
 const MAX_HEADER_BYTES: usize = 8 * 1024;
-const MAX_BODY_BYTES: usize = 4 * 1024;
+const MAX_BODY_BYTES: usize = 20 * 1024;
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const CONSOLE_KEY: u16 = 0xC0; // VK_OEM_3, the default CS2 console key on US-layout keyboards.
 const CS2_LAUNCH_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Deserialize)]
 struct PlayDemoRequest {
     path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadDemoRequest {
+    url: String,
+    match_id: String,
+    #[serde(default)]
+    cookies: String,
 }
 
 struct HttpRequest {
@@ -50,7 +63,13 @@ struct HttpRequest {
     body: Vec<u8>,
 }
 
-pub fn start() -> Result<(), String> {
+pub fn start(app: AppHandle) -> Result<(), String> {
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| format!("Could not resolve the GC demo cache directory: {error}"))?
+        .join("gc-demos");
+    let storage = Arc::new(crate::demo_storage::DemoStorage::new(cache_dir)?);
     let listener = match TcpListener::bind(("127.0.0.1", PORT)) {
         Ok(listener) => listener,
         Err(error) => {
@@ -59,12 +78,21 @@ pub fn start() -> Result<(), String> {
             return Err(message);
         }
     };
+    let listener_storage = Arc::clone(&storage);
     if let Err(error) = thread::Builder::new()
         .name("p2p-gc-demo-listener".to_string())
         .spawn(move || {
             for incoming in listener.incoming() {
                 match incoming {
-                    Ok(stream) => handle_connection(stream),
+                    Ok(stream) => {
+                        let storage = Arc::clone(&listener_storage);
+                        if let Err(error) = thread::Builder::new()
+                            .name("p2p-gc-demo-request".to_string())
+                            .spawn(move || handle_connection(stream, storage))
+                        {
+                            log::error!("Could not start GC demo request worker: {error}");
+                        }
+                    }
                     Err(error) => log::error!("GC demo listener error: {error}"),
                 }
             }
@@ -74,17 +102,32 @@ pub fn start() -> Result<(), String> {
         log::error!("{message}");
         return Err(message);
     }
+    let cleanup_storage = Arc::clone(&storage);
+    thread::Builder::new()
+        .name("p2p-gc-demo-cleanup".to_string())
+        .spawn(move || loop {
+            thread::sleep(CLEANUP_INTERVAL);
+            match cleanup_storage.cleanup_expired() {
+                Ok(removed) if removed > 0 => {
+                    log::info!("Periodic GC demo cleanup removed {removed} expired file(s)");
+                }
+                Ok(_) => {}
+                Err(error) => log::error!("Periodic GC demo cleanup failed: {error}"),
+            }
+        })
+        .map_err(|error| format!("Could not start GC demo cleanup worker: {error}"))?;
     log::info!("GC demo listener listening on 127.0.0.1:{PORT}");
     Ok(())
 }
 
-fn handle_connection(stream: TcpStream) {
+fn handle_connection(stream: TcpStream, storage: Arc<crate::demo_storage::DemoStorage>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let mut reader = BufReader::new(stream);
     let request = match read_request(&mut reader) {
         Ok(request) => request,
         Err((status, message)) => {
+            log::error!("GC demo HTTP request rejected with {status}: {message}");
             respond(reader.get_mut(), status, &message, false);
             return;
         }
@@ -94,6 +137,7 @@ fn handle_connection(stream: TcpStream) {
     let host_allowed = request.headers.get("host").map(String::as_str)
         == Some(format!("127.0.0.1:{PORT}").as_str());
     if !origin_allowed || !host_allowed {
+        log::warn!("GC demo listener rejected request with an invalid origin or host");
         respond(
             reader.get_mut(),
             "403 Forbidden",
@@ -103,7 +147,11 @@ fn handle_connection(stream: TcpStream) {
         return;
     }
 
-    if request.target != ENDPOINT && request.target != HEALTH_ENDPOINT {
+    if request.target != ENDPOINT
+        && request.target != DOWNLOAD_ENDPOINT
+        && request.target != HEALTH_ENDPOINT
+    {
+        log::warn!("GC demo request rejected for an unknown endpoint");
         respond(
             reader.get_mut(),
             "404 Not Found",
@@ -113,14 +161,16 @@ fn handle_connection(stream: TcpStream) {
         return;
     }
     if request.method == "OPTIONS" {
+        log::info!("GC demo listener accepted a browser preflight");
         respond(reader.get_mut(), "204 No Content", "", true);
         return;
     }
     if request.method == "GET" && request.target == HEALTH_ENDPOINT {
+        log::info!("GC demo health check received");
         respond(reader.get_mut(), "200 OK", "P2P-Cast pronto.", true);
         return;
     }
-    if request.target != ENDPOINT {
+    if request.target != ENDPOINT && request.target != DOWNLOAD_ENDPOINT {
         respond(
             reader.get_mut(),
             "405 Method Not Allowed",
@@ -145,6 +195,7 @@ fn handle_connection(stream: TcpStream) {
         .map(str::trim)
         != Some("application/json")
     {
+        log::error!("GC demo request rejected because its content type is invalid");
         respond(
             reader.get_mut(),
             "415 Unsupported Media Type",
@@ -154,17 +205,22 @@ fn handle_connection(stream: TcpStream) {
         return;
     }
 
-    let request: PlayDemoRequest = match serde_json::from_slice(&request.body) {
-        Ok(request) => request,
-        Err(_) => {
-            log::error!("GC demo request rejected: invalid JSON body");
-            respond(reader.get_mut(), "400 Bad Request", "JSON inválido.", true);
-            return;
+    log::info!("GC demo listener received a request for {}", request.target);
+
+    let result = if request.target == DOWNLOAD_ENDPOINT {
+        match serde_json::from_slice::<DownloadDemoRequest>(&request.body) {
+            Ok(request) => download_and_open(request, &storage),
+            Err(_) => Err("JSON inválido para o download da demo.".to_string()),
+        }
+    } else {
+        match serde_json::from_slice::<PlayDemoRequest>(&request.body) {
+            Ok(request) => open_demo(&request.path),
+            Err(_) => Err("JSON inválido para abrir a demo.".to_string()),
         }
     };
-    match open_demo(&request.path) {
+    match result {
         Ok(message) => {
-            log::info!("GC demo request sent to CS2");
+            log::info!("GC demo request completed successfully");
             respond(reader.get_mut(), "200 OK", &message, true);
         }
         Err(message) => {
@@ -271,6 +327,7 @@ fn respond(stream: &mut TcpStream, status: &str, message: &str, allow_gc_origin:
             "Access-Control-Allow-Origin: {GC_ORIGIN}\r\n\
              Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
              Access-Control-Allow-Headers: Content-Type\r\n\
+             Access-Control-Allow-Private-Network: true\r\n\
              Access-Control-Max-Age: 600\r\n\
              Vary: Origin\r\n"
         )
@@ -283,6 +340,30 @@ fn respond(stream: &mut TcpStream, status: &str, message: &str, allow_gc_origin:
         body.len(),
     );
     let _ = stream.flush();
+}
+
+fn download_and_open(
+    request: DownloadDemoRequest,
+    storage: &crate::demo_storage::DemoStorage,
+) -> Result<String, String> {
+    if !valid_match_id(&request.match_id) {
+        return Err("O identificador da partida é inválido.".to_string());
+    }
+    let demo_path =
+        crate::demo_download::download(&request.url, &request.cookies, &request.match_id, storage)?;
+    log::info!(
+        "GC demo download completed for match {}; opening CS2",
+        request.match_id
+    );
+    open_demo(&demo_path.to_string_lossy())
+}
+
+fn valid_match_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn open_demo(path: &str) -> Result<String, String> {
