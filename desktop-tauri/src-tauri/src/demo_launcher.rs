@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::null_mut,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Deserialize;
@@ -21,9 +21,10 @@ use windows_sys::Win32::{
             SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
             KEYEVENTF_UNICODE, VK_RETURN,
         },
+        Shell::ShellExecuteW,
         WindowsAndMessaging::{
             BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowThreadProcessId,
-            IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOWNORMAL,
         },
     },
 };
@@ -35,6 +36,7 @@ const GC_ORIGIN: &str = "https://gamersclub.com.br";
 const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024;
 const CONSOLE_KEY: u16 = 0xC0; // VK_OEM_3, the default CS2 console key on US-layout keyboards.
+const CS2_LAUNCH_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Deserialize)]
 struct PlayDemoRequest {
@@ -49,19 +51,30 @@ struct HttpRequest {
 }
 
 pub fn start() -> Result<(), String> {
-    let listener = TcpListener::bind(("127.0.0.1", PORT))
-        .map_err(|error| format!("Could not bind the GC demo listener on port {PORT}: {error}"))?;
-    thread::Builder::new()
+    let listener = match TcpListener::bind(("127.0.0.1", PORT)) {
+        Ok(listener) => listener,
+        Err(error) => {
+            let message = format!("Could not bind the GC demo listener on port {PORT}: {error}");
+            log::error!("{message}");
+            return Err(message);
+        }
+    };
+    if let Err(error) = thread::Builder::new()
         .name("p2p-gc-demo-listener".to_string())
         .spawn(move || {
             for incoming in listener.incoming() {
                 match incoming {
                     Ok(stream) => handle_connection(stream),
-                    Err(error) => eprintln!("GC demo listener error: {error}"),
+                    Err(error) => log::error!("GC demo listener error: {error}"),
                 }
             }
         })
-        .map_err(|error| format!("Could not start the GC demo listener thread: {error}"))?;
+    {
+        let message = format!("Could not start the GC demo listener thread: {error}");
+        log::error!("{message}");
+        return Err(message);
+    }
+    log::info!("GC demo listener listening on 127.0.0.1:{PORT}");
     Ok(())
 }
 
@@ -144,13 +157,20 @@ fn handle_connection(stream: TcpStream) {
     let request: PlayDemoRequest = match serde_json::from_slice(&request.body) {
         Ok(request) => request,
         Err(_) => {
+            log::error!("GC demo request rejected: invalid JSON body");
             respond(reader.get_mut(), "400 Bad Request", "JSON inválido.", true);
             return;
         }
     };
     match open_demo(&request.path) {
-        Ok(message) => respond(reader.get_mut(), "200 OK", &message, true),
-        Err(message) => respond(reader.get_mut(), "400 Bad Request", &message, true),
+        Ok(message) => {
+            log::info!("GC demo request sent to CS2");
+            respond(reader.get_mut(), "200 OK", &message, true);
+        }
+        Err(message) => {
+            log::error!("GC demo request failed: {message}");
+            respond(reader.get_mut(), "400 Bad Request", &message, true);
+        }
     }
 }
 
@@ -267,8 +287,16 @@ fn respond(stream: &mut TcpStream, status: &str, message: &str, allow_gc_origin:
 
 fn open_demo(path: &str) -> Result<String, String> {
     let path = validate_demo_path(path)?;
-    let window =
-        find_cs2_window().ok_or_else(|| "Abra o CS2 antes de abrir a demo.".to_string())?;
+    let window = match find_cs2_window() {
+        Some(window) => window,
+        None => {
+            log::info!("CS2 is not running; requesting Steam to launch app 730");
+            launch_cs2_via_steam()?;
+            let window = wait_for_cs2_window()?;
+            log::info!("CS2 window detected after Steam launch");
+            window
+        }
+    };
     focus_cs2(window)?;
 
     send_key(CONSOLE_KEY)?;
@@ -280,6 +308,44 @@ fn open_demo(path: &str) -> Result<String, String> {
     send_key(CONSOLE_KEY)?;
 
     Ok("Demo enviada ao console do CS2.".to_string())
+}
+
+fn launch_cs2_via_steam() -> Result<(), String> {
+    let operation: Vec<u16> = "open\0".encode_utf16().collect();
+    let uri: Vec<u16> = "steam://rungameid/730\0".encode_utf16().collect();
+    let result = unsafe {
+        ShellExecuteW(
+            null_mut(),
+            operation.as_ptr(),
+            uri.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    let result_code = result as isize;
+    if result_code <= 32 {
+        return Err(format!(
+            "O Windows não conseguiu iniciar o CS2 pelo Steam (erro {result_code})."
+        ));
+    }
+    Ok(())
+}
+
+fn wait_for_cs2_window() -> Result<HWND, String> {
+    let deadline = Instant::now() + CS2_LAUNCH_TIMEOUT;
+    loop {
+        if let Some(window) = find_cs2_window() {
+            return Ok(window);
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "O CS2 não abriu em até dois minutos. Confira o Steam e tente novamente."
+                    .to_string(),
+            );
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
 }
 
 fn validate_demo_path(path: &str) -> Result<PathBuf, String> {

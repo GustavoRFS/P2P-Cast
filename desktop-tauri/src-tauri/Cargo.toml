@@ -1,6 +1,6 @@
 [package]
 name = "p2p-cast-desktop-tauri"
-version = "0.4.6"
+version = "0.4.7"
 description = "P2P-Cast desktop host built with Tauri"
 authors = ["P2P-Cast"]
 edition = "2021"
@@ -33,6 +33,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Graphics_Gdi",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows = { version = "0.62.2", features = [
