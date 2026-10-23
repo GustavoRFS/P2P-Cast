@@ -75,6 +75,6 @@
 - Produces: signed version 0.4.7 installer and updater metadata in the latest GitHub release.
 
 - [x] Set all desktop app version declarations to `0.4.7` and synchronize the Cargo root package lock entry.
-- [ ] Build and publish the signed Windows installer and `latest.json` using the existing release script on `ligma`; inspect the published release assets and version before considering the OTA step complete.
-- [ ] Keep `backend/bun.lock` unstaged and outside the release commit.
-- [ ] Confirm the local unpacked extension source is updated; Chrome requires its existing unpacked extension to be reloaded for the new service worker to take effect.
+- [x] Build and publish the signed Windows installer and `latest.json` using the existing release script on `ligma`; inspect the published release assets and version before considering the OTA step complete. `desktop-v0.4.7` is public and the latest feed reports version `0.4.7`.
+- [x] Keep `backend/bun.lock` unstaged and outside the release commit.
+- [x] Confirm the local unpacked extension source is updated. Chrome still needs a manual reload of the unpacked extension for the new service worker to take effect.
