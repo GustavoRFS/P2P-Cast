@@ -62,7 +62,7 @@ npm test               # shared logic (src/lib)
   "Atualizações do desktop" in the root README.
 - **Web download offer**: `InstallAppModal` suggests the Windows installer or the APK (from the
   newest `desktop-v*` / `android-v*` release) to web visitors; iOS/iPadOS and computers without an
-  app get nothing, and "Agora não" snoozes it for 14 days.
+  app get nothing. It appears on every page load until the visitor closes it.
 
 ## Platform notes
 

@@ -7,8 +7,6 @@ import {
     findAppDownload,
     formatDownloadSize,
     RELEASES_PAGE_URL,
-    shouldOfferInstall,
-    snoozeInstallOffer,
     type AppDownload,
     type InstallTarget,
 } from "../../lib/app-downloads";
@@ -39,18 +37,10 @@ const COPY: Record<InstallTarget, { title: string; subtitle: string; points: str
     },
 };
 
-function storage(): Storage | null {
-    try {
-        return window.localStorage;
-    } catch {
-        return null;
-    }
-}
-
 /**
  * On the public web page, offers the app that fits the device: the Windows installer or the
  * Android APK, from the latest GitHub release. iOS, macOS and Linux get nothing (there is no app),
- * and neither does the page running inside the desktop app. "Agora não" or a download snoozes it.
+ * and neither does the page running inside the desktop app. The offer appears on every page load.
  */
 export function InstallAppModal() {
     const [target, setTarget] = useState<InstallTarget | null>(null);
@@ -60,7 +50,7 @@ export function InstallAppModal() {
     useEffect(() => {
         if (getAppPlatform() !== "web" || typeof navigator === "undefined") return;
         const detected = detectInstallTarget(navigator.userAgent, navigator.maxTouchPoints);
-        if (!detected || !shouldOfferInstall(storage())) return;
+        if (!detected) return;
         let active = true;
         setTarget(detected);
         const lookup = findAppDownload(detected).catch(() => null);
@@ -80,10 +70,7 @@ export function InstallAppModal() {
     if (!target) return null;
     const copy = COPY[target];
     const size = download ? formatDownloadSize(download.size) : null;
-    const close = () => {
-        snoozeInstallOffer(storage());
-        setVisible(false);
-    };
+    const close = () => setVisible(false);
 
     return (
         <AppModal

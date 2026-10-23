@@ -3,10 +3,6 @@ import {
     detectInstallTarget,
     findAppDownload,
     formatDownloadSize,
-    INSTALL_OFFER_SNOOZE_MS,
-    INSTALL_OFFER_STORAGE_KEY,
-    shouldOfferInstall,
-    snoozeInstallOffer,
 } from "./app-downloads";
 
 const UA = {
@@ -16,16 +12,6 @@ const UA = {
     ipadDesktopMode: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15",
     linux: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
 };
-
-function memoryStorage(initial: Record<string, string> = {}) {
-    const values = new Map(Object.entries(initial));
-    return {
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => {
-            values.set(key, value);
-        },
-    };
-}
 
 function fakeFetch(body: unknown, ok = true): typeof fetch {
     return (async () => ({ ok, json: async () => body })) as unknown as typeof fetch;
@@ -73,21 +59,6 @@ describe("findAppDownload", () => {
         await expect(findAppDownload("windows", fakeFetch({ message: "rate limited" }, false))).resolves.toBeNull();
         await expect(findAppDownload("android", fakeFetch([RELEASES[2]]))).resolves.toBeNull();
         await expect(findAppDownload("windows", fakeFetch({ message: "not a list" }))).resolves.toBeNull();
-    });
-});
-
-describe("install offer snooze", () => {
-    it("offers until dismissed, then again after the snooze", () => {
-        const storage = memoryStorage();
-        expect(shouldOfferInstall(storage, 1000)).toBe(true);
-        snoozeInstallOffer(storage, 1000);
-        expect(shouldOfferInstall(storage, 1000 + INSTALL_OFFER_SNOOZE_MS - 1)).toBe(false);
-        expect(shouldOfferInstall(storage, 1000 + INSTALL_OFFER_SNOOZE_MS)).toBe(true);
-    });
-
-    it("offers when storage is missing or holds garbage", () => {
-        expect(shouldOfferInstall(null)).toBe(true);
-        expect(shouldOfferInstall(memoryStorage({ [INSTALL_OFFER_STORAGE_KEY]: "soon" }))).toBe(true);
     });
 });
 

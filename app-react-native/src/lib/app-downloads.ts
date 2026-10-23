@@ -12,16 +12,8 @@ export type AppDownload = {
     size: number;
 };
 
-type StorageLike = {
-    getItem(key: string): string | null;
-    setItem(key: string, value: string): void;
-};
-
 export const RELEASES_PAGE_URL = "https://github.com/GustavoRFS/P2P-Cast/releases";
 const RELEASES_API_URL = "https://api.github.com/repos/GustavoRFS/P2P-Cast/releases?per_page=30";
-export const INSTALL_OFFER_STORAGE_KEY = "p2pcast.install-offer-dismissed-at";
-/** After "Agora não" (or a download), the offer comes back only after this long. */
-export const INSTALL_OFFER_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
 
 const RELEASE_ASSETS: Record<InstallTarget, { tagPrefix: string; assetSuffix: string }> = {
     windows: { tagPrefix: "desktop-v", assetSuffix: "-setup.exe" },
@@ -67,25 +59,6 @@ export async function findAppDownload(
         }
     }
     return null;
-}
-
-export function shouldOfferInstall(storage: StorageLike | null, now = Date.now()): boolean {
-    try {
-        const saved = storage?.getItem(INSTALL_OFFER_STORAGE_KEY);
-        if (!saved) return true;
-        const dismissedAt = Number(saved);
-        return !Number.isFinite(dismissedAt) || now - dismissedAt >= INSTALL_OFFER_SNOOZE_MS;
-    } catch {
-        return true;
-    }
-}
-
-export function snoozeInstallOffer(storage: StorageLike | null, now = Date.now()): void {
-    try {
-        storage?.setItem(INSTALL_OFFER_STORAGE_KEY, String(now));
-    } catch {
-        // Private browsing or blocked storage: the offer may come back next visit.
-    }
 }
 
 export function formatDownloadSize(bytes: number): string | null {
