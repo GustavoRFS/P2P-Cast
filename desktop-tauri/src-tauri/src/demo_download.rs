@@ -198,7 +198,7 @@ fn validate_url(value: &str) -> Result<Url, String> {
         return Err("A URL da demo é inválida ou muito grande.".to_string());
     }
     let url = Url::parse(value).map_err(|_| "A URL da demo é inválida.".to_string())?;
-    if url.scheme() != "https:" || !url.username().is_empty() || url.password().is_some() {
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
         return Err("A GC precisa enviar uma URL HTTPS válida.".to_string());
     }
     let host = url
